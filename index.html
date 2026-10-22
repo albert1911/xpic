@@ -52,7 +52,10 @@
   summary { cursor: pointer; color: var(--dim); }
   details label { display: block; margin-top: 12px; font-size: .9rem; color: var(--dim); }
   details label input[type=text] { width: 100%; margin-top: 4px; }
-  details label.check { display: flex; gap: 4px; color: var(--text); }
+  .autosave { flex: 1 1 100%; order: 6; display: flex; align-items: center; gap: 6px; }
+  .folder { order: 7; flex: 1 1 100%; }
+  .folder input { width: 100%; }
+  .folder small { display: block; margin-top: 6px; }
   input[type=checkbox] { flex: none; accent-color: var(--accent); cursor: pointer; }
   details small { display: block; margin-top: 12px; }
   .bar { flex-wrap: wrap; gap: 8px; }
@@ -67,8 +70,10 @@
     .hint { order: 2; margin-top: -2px; }
     #go { order: 3; }
     #paste { order: 4; }
+    .autosave { order: 5; }
+    .folder { order: 6; }
     .bar { flex-direction: column; align-items: stretch; }
-    .bar .btns > * { flex: 1; }
+    .bar .btns > * { flex: 1; padding: 8px 10px; }
     .grid { grid-template-columns: 1fr; }
   }
 </style>
@@ -81,7 +86,12 @@
     <input id="url" type="url" inputmode="url" placeholder="Paste your link here..." autocomplete="off" required>
     <button id="go" type="submit">Get images</button>
     <button id="paste" type="button" class="ghost">Paste</button>
-    <small class="hint">Supports X (Twitter) and Pixiv links</small>
+    <small class="hint">Supports X (Twitter) and Pixiv links.</small>
+    <label class="autosave"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
+    <div class="folder" id="folderBox" hidden>
+      <input type="text" id="folder" placeholder="Insert your drive folder here..." autocomplete="off">
+      <small>Leave empty for My Drive root.<br>Nest folders with <code>/</code>.<br><code>{user}</code> = post author.</small>
+    </div>
   </form>
   <div id="status"></div>
   <div id="result" hidden>
@@ -99,11 +109,7 @@
     <label>OAuth Client ID (see README)
       <input type="text" id="clientId" placeholder="123456-abc.apps.googleusercontent.com" autocomplete="off">
     </label>
-    <label>Drive folder (nested with /, <code>{user}</code> = post author)
-      <input type="text" id="folder" placeholder="Pictures" autocomplete="off">
-    </label>
-    <label class="check"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
-    <small>Override per link with <code>?folder=Memes/Cats</code> or <code>?auto=0</code>.</small>
+    <small>Folder is nested with <code>/</code>, <code>{user}</code> = post author. Override per link with <code>?folder=Memes/Cats</code> or <code>?auto=0</code>.</small>
   </details>
 </main>
 
@@ -201,7 +207,7 @@ const list = (query) =>
   api(`https://www.googleapis.com/drive/v3/files?fields=files(id)&q=${encodeURIComponent(query)}`);
 
 function folderPath() {
-  const raw = q.get("folder") ?? cfg.get("folder", "Pictures");
+  const raw = q.get("folder") ?? cfg.get("folder");
   return raw.replaceAll("{user}", current.user);
 }
 
@@ -237,7 +243,7 @@ async function saveToDrive() {
   try {
     setStatus("Connecting to Google Drive…");
     await getToken();
-    const path = folderPath();
+    const path = folderPath().replace(/^\/+|\/+$/g, "");
     setStatus(`Saving to Drive/${path}…`);
     const folderId = await ensureFolder(path);
     const failed = [];
@@ -320,11 +326,15 @@ $("drive").onclick = saveToDrive;
 
 // Settings (saved on change)
 $("clientId").value = cfg.get("clientId");
-$("folder").value = cfg.get("folder", "Pictures");
+$("folder").value = cfg.get("folder");
 $("auto").checked = cfg.get("auto", "1") === "1";
+$("folderBox").hidden = !$("auto").checked;
 $("clientId").onchange = (e) => cfg.set("clientId", e.target.value.trim());
 $("folder").onchange = (e) => cfg.set("folder", e.target.value.trim());
-$("auto").onchange = (e) => cfg.set("auto", e.target.checked ? "1" : "0");
+$("auto").onchange = (e) => {
+  cfg.set("auto", e.target.checked ? "1" : "0");
+  $("folderBox").hidden = !e.target.checked;
+};
 if (!cfg.get("clientId")) $("settings").open = true;
 
 // Opened via share sheet (?url= / ?text=) or ?u=
