@@ -1,7 +1,7 @@
 {
   "name": "X Pic Grabber",
   "short_name": "XPic",
-  "description": "Download the images from an X post link",
+  "description": "Download the images from an X or Pixiv post link",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

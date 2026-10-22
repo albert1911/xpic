@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>X Pic Grabber</title>
+<title>X-PIC</title>
 <meta name="theme-color" content="#0f1115">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
@@ -46,11 +46,8 @@
   summary { cursor: pointer; color: var(--dim); }
   details label { display: block; margin-top: 12px; font-size: .9rem; color: var(--dim); }
   details label input[type=text] { width: 100%; margin-top: 4px; }
-  details label.check { display: flex; gap: 10px; align-items: center; color: var(--text); font-size: 1rem; }
-  input[type=checkbox] {
-    flex: none; width: 20px; height: 20px; min-width: 20px; padding: 0; margin: 0;
-    accent-color: var(--accent); cursor: pointer;
-  }
+  details label.check { display: flex; gap: 4px; color: var(--text); }
+  input[type=checkbox] { flex: none; accent-color: var(--accent); cursor: pointer; }
   details small { display: block; margin-top: 12px; }
   .bar { flex-wrap: wrap; gap: 8px; }
   .bar .btns { display: flex; gap: 8px; }
@@ -69,9 +66,9 @@
 </head>
 <body>
 <main>
-  <h1>X Pic Grabber</h1>
+  <h1>X-PIC</h1>
   <form id="form">
-    <input id="url" type="url" inputmode="url" placeholder="https://x.com/user/status/123…" autocomplete="off" required>
+    <input id="url" type="url" inputmode="url" placeholder="Paste your link here..." autocomplete="off" required>
     <button id="go" type="submit">Get images</button>
     <button id="paste" type="button" class="ghost">Paste</button>
   </form>
@@ -92,7 +89,7 @@
       <input type="text" id="clientId" placeholder="123456-abc.apps.googleusercontent.com" autocomplete="off">
     </label>
     <label>Drive folder (nested with /, <code>{user}</code> = post author)
-      <input type="text" id="folder" placeholder="XPic" autocomplete="off">
+      <input type="text" id="folder" placeholder="Pictures" autocomplete="off">
     </label>
     <label class="check"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
     <small>Override per link with <code>?folder=Memes/Cats</code> or <code>?auto=0</code>.</small>
@@ -114,12 +111,36 @@ let current = { user: "", id: "", urls: [] };
 const setStatus = (msg, err = false) => { statusEl.textContent = msg; statusEl.className = err ? "err" : ""; };
 
 function parse(text) {
-  const m = text.match(/(?:x|twitter)\.com\/([^/?#\s]+)\/status\/(\d+)/i);
-  return m && { user: m[1], id: m[2] };
+  const x = text.match(/(?:x|twitter)\.com\/([^/?#\s]+)\/status\/(\d+)/i);
+  if (x) return { site: "x", user: x[1], id: x[2] };
+  const px = text.match(/pixiv\.net\/(?:\w+\/)?(?:artworks|i)\/(\d+)|pixiv\.net\/.*[?&]illust_id=(\d+)/i);
+  if (px) return { site: "pixiv", user: "pixiv", id: px[1] || px[2] };
+  return null;
+}
+
+// Pixiv's image servers need a Referer a browser page can't send, so go through the pixiv.re mirror.
+// It only sends CORS headers on success, so a failed probe (404 or unreachable) just means "no more pages".
+async function fetchPixiv({ id }) {
+  const base = `https://pixiv.re/${id}`;
+  const probe = async (u) => {
+    const r = await fetch(u, { method: "HEAD" }).catch(() => null);
+    if (!r?.ok) return false;
+    const t = r.headers.get("content-type") ?? "";
+    exts.set(u, t.includes("png") ? ".png" : t.includes("gif") ? ".gif" : t.includes("webp") ? ".webp" : ".jpg");
+    return true;
+  };
+  const urls = [];
+  // multi-page works are ID-1, ID-2, …; single-page works are just ID
+  for (let n = 1; n <= 100 && await probe(`${base}-${n}.jpg`); n++) urls.push(`${base}-${n}.jpg`);
+  if (!urls.length && await probe(`${base}.jpg`)) urls.push(`${base}.jpg`);
+  if (!urls.length) throw new Error("No images found. The work may be private/deleted, or pixiv.re may be down.");
+  return urls;
 }
 
 // Returns image URLs (video posts give their thumbnail).
-async function fetchImages({ user, id }) {
+async function fetchImages(p) {
+  if (p.site === "pixiv") return fetchPixiv(p);
+  const { user, id } = p;
   const res = await fetch(`https://api.fxtwitter.com/${user}/status/${id}`);
   if (res.status === 404) throw new Error("Post not found (deleted or private?)");
   if (!res.ok) throw new Error(`Lookup failed (${res.status})`);
@@ -129,7 +150,8 @@ async function fetchImages({ user, id }) {
 }
 
 const withSize = (u, name) => (u.includes("pbs.twimg.com") ? `${u.split("?")[0]}?name=${name}` : u);
-const extOf = (u) => (u.split("?")[0].match(/\.(jpe?g|png|webp|gif)$/i)?.[0] ?? ".jpg");
+const exts = new Map(); // url -> real extension, when the URL's own isn't reliable (pixiv.re)
+const extOf = (u) => exts.get(u) ?? u.split("?")[0].match(/\.(jpe?g|png|webp|gif)$/i)?.[0] ?? ".jpg";
 
 const fileName = (u, i) => `${current.user}-${current.id}-${i + 1}${extOf(u)}`;
 
@@ -168,7 +190,7 @@ const list = (query) =>
   api(`https://www.googleapis.com/drive/v3/files?fields=files(id)&q=${encodeURIComponent(query)}`);
 
 function folderPath() {
-  const raw = q.get("folder") ?? cfg.get("folder", "XPic");
+  const raw = q.get("folder") ?? cfg.get("folder", "Pictures");
   return raw.replaceAll("{user}", current.user);
 }
 
@@ -257,7 +279,7 @@ function render() {
 async function run(text) {
   const p = parse(text);
   $("result").hidden = true;
-  if (!p) return setStatus("That doesn't look like an X post link.", true);
+  if (!p) return setStatus("That doesn't look like an X or Pixiv link.", true);
   $("go").disabled = true;
   setStatus("Fetching…");
   try {
@@ -287,7 +309,7 @@ $("drive").onclick = saveToDrive;
 
 // Settings (saved on change)
 $("clientId").value = cfg.get("clientId");
-$("folder").value = cfg.get("folder", "XPic");
+$("folder").value = cfg.get("folder", "Pictures");
 $("auto").checked = cfg.get("auto", "1") === "1";
 $("clientId").onchange = (e) => cfg.set("clientId", e.target.value.trim());
 $("folder").onchange = (e) => cfg.set("folder", e.target.value.trim());
