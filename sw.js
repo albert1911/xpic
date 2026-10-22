@@ -1,4 +1,4 @@
-const VERSION = 3;
+const VERSION = 3.1;
 const CACHE = `xpic-v${VERSION}`;
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 

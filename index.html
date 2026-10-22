@@ -42,6 +42,7 @@
   .item .row { display: flex; gap: 8px; padding: 8px; }
   .item .row > * { flex: 1; padding: 8px; font-size: .9rem; }
   small { color: var(--dim); }
+  .hint { display: block; margin-top: 8px; }
   details { margin-top: 16px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
   summary { cursor: pointer; color: var(--dim); }
   details label { display: block; margin-top: 12px; font-size: .9rem; color: var(--dim); }
@@ -72,6 +73,7 @@
     <button id="go" type="submit">Get images</button>
     <button id="paste" type="button" class="ghost">Paste</button>
   </form>
+  <small class="hint">Supports X (Twitter) and Pixiv links</small>
   <div id="status"></div>
   <div id="result" hidden>
     <div class="bar"><small id="count"></small>
