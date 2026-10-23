@@ -227,6 +227,23 @@ function renderHistory() {
   const box = $("folderPills");
   const v = $("folder").value;
   box.replaceChildren();
+  if (v.trim()) {
+    const back = document.createElement("span");
+    back.className = "pill";
+    const up = document.createElement("button");
+    up.type = "button";
+    up.textContent = "← Back";
+    up.onclick = () => {
+      const s = segs(v).slice(0, -1);
+      const path = s.length ? s.join("/") + "/" : "";
+      $("folder").value = path;
+      cfg.set("folder", path);
+      $("folder").focus();
+      renderHistory();
+    };
+    back.append(up);
+    box.append(back);
+  }
   const parts = v.split("/");
   const prefix = segs(parts.slice(0, -1).join("/"));
   const partial = parts.at(-1).trim().toLowerCase();
