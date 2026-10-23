@@ -10,8 +10,10 @@ Paste an X post link, get its images, optionally auto-save them to Google Drive.
    Under **Authorized JavaScript origins** add `https://<you>.github.io` (origin only, no path).
 5. Copy the Client ID into the app's *Google Drive settings*.
 
-Scope used is `drive.file`: the app can only touch folders/files it created itself, so it creates the
-folder path you configure (default `XPic`) in My Drive. It can't write into a folder you made by hand.
+Scope used is `drive` (full access), so the app finds folders you made by hand and saves into them; any
+missing folder in the configured path is created. It's a restricted scope, so Google shows an
+"unverified app" warning — fine for personal use as a Test user. If you used an older version you'll be
+asked to consent again.
 
 ## Folder parameter
 - Default folder is set in settings. `{user}` is replaced with the post author, e.g. `XPic/{user}`.

@@ -121,7 +121,7 @@
 const $ = (id) => document.getElementById(id);
 const statusEl = $("status");
 const q = new URLSearchParams(location.search);
-const SCOPE = "https://www.googleapis.com/auth/drive.file"; // only files/folders this app creates
+const SCOPE = "https://www.googleapis.com/auth/drive"; // full access: needed to find and write into folders you made yourself
 
 const cfg = {
   get: (k, d = "") => { try { return localStorage.getItem("xpic." + k) ?? d; } catch { return d; } },
