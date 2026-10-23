@@ -56,7 +56,10 @@
   .folder { order: 7; flex: 1 1 100%; }
   .folder input { width: 100%; }
   .folder small { display: block; margin-top: 6px; }
-  input[type=checkbox] { flex: none; accent-color: var(--accent); cursor: pointer; }
+  #folderPills { display: flex; flex-wrap: wrap; gap: 6px; }
+  #folderPills:not(:empty) { margin-top: 8px; }
+  .pill { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--card); font-size: .85rem; }
+  .pill button { background: none; border: 0; color: inherit; padding: 4px 10px; border-radius: 999px; font-size: inherit; cursor: pointer; }  input[type=checkbox] { flex: none; accent-color: var(--accent); cursor: pointer; }
   details small { display: block; margin-top: 12px; }
   .bar { flex-wrap: wrap; gap: 8px; }
   .bar .btns { display: flex; gap: 8px; }
@@ -90,6 +93,7 @@
     <label class="autosave"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
     <div class="folder" id="folderBox" hidden>
       <input type="text" id="folder" placeholder="Insert your drive folder here..." autocomplete="off">
+      <div id="folderPills"></div>
       <small>Leave empty for My Drive root.<br>Nest folders with <code>/</code>.<br><code>{user}</code> = post author.</small>
     </div>
   </form>
@@ -206,9 +210,54 @@ const esc = (s) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 const list = (query) =>
   api(`https://www.googleapis.com/drive/v3/files?fields=files(id)&q=${encodeURIComponent(query)}`);
 
+const rawFolder = () => q.get("folder") ?? cfg.get("folder");
 function folderPath() {
-  const raw = q.get("folder") ?? cfg.get("folder");
-  return raw.replaceAll("{user}", current.user);
+  return rawFolder().replaceAll("{user}", current.user);
+}
+
+// Folders used before, most recent first; offered as suggestions on the folder input.
+const HISTORY_MAX = 30;
+const getHistory = () => { try { return JSON.parse(cfg.get("history", "[]")); } catch { return []; } };
+const setHistory = (h) => cfg.set("history", JSON.stringify(h));
+const segs = (p) => p.split("/").map((s) => s.trim()).filter(Boolean);
+const sameSegs = (a, b) => a.every((s, i) => s.toLowerCase() === b[i]?.toLowerCase());
+
+// Shows the known subfolders of what's before the last "/" as pills (top-level folders until a "/" is typed).
+function renderHistory() {
+  const box = $("folderPills");
+  const v = $("folder").value;
+  box.replaceChildren();
+  const parts = v.split("/");
+  const prefix = segs(parts.slice(0, -1).join("/"));
+  const partial = parts.at(-1).trim().toLowerCase();
+  const names = new Map(); // lowercase -> display name
+  for (const p of getHistory()) {
+    const s = segs(p);
+    if (s.length > prefix.length && sameSegs(prefix, s) && s[prefix.length].toLowerCase().startsWith(partial))
+      names.set(s[prefix.length].toLowerCase(), s[prefix.length]);
+  }
+  for (const name of names.values()) {
+    const path = [...prefix, name].join("/");
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    const pick = document.createElement("button");
+    pick.type = "button";
+    pick.textContent = name;
+    pick.onclick = () => {
+      $("folder").value = path + "/";
+      cfg.set("folder", path + "/");
+      $("folder").focus();
+      renderHistory();
+    };
+    pill.append(pick);
+    box.append(pill);
+  }
+}
+function rememberFolder(p) {
+  p = p.trim();
+  if (!p) return;
+  setHistory([p, ...getHistory().filter((x) => x !== p)].slice(0, HISTORY_MAX));
+  renderHistory();
 }
 
 // Finds or creates each folder in the path, returns the last folder's id.
@@ -251,6 +300,7 @@ async function saveToDrive() {
       try { await uploadOne(folderId, u, i); } catch { failed.push(i + 1); }
     }
     const n = current.urls.length;
+    if (failed.length < n) rememberFolder(rawFolder());
     setStatus(failed.length
       ? `Saved ${n - failed.length}/${n} to Drive/${path}. Failed: #${failed.join(", #")}`
       : `Saved ${n} image${n === 1 ? "" : "s"} to Drive/${path}`, failed.length > 0);
@@ -327,10 +377,13 @@ $("drive").onclick = saveToDrive;
 // Settings (saved on change)
 $("clientId").value = cfg.get("clientId");
 $("folder").value = cfg.get("folder");
+renderHistory();
 $("auto").checked = cfg.get("auto", "1") === "1";
 $("folderBox").hidden = !$("auto").checked;
 $("clientId").onchange = (e) => cfg.set("clientId", e.target.value.trim());
 $("folder").onchange = (e) => cfg.set("folder", e.target.value.trim());
+$("folder").oninput = renderHistory;
+$("folder").onfocus = renderHistory;
 $("auto").onchange = (e) => {
   cfg.set("auto", e.target.checked ? "1" : "0");
   $("folderBox").hidden = !e.target.checked;
