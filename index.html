@@ -89,7 +89,7 @@
     <input id="url" type="url" inputmode="url" placeholder="Paste your link here..." autocomplete="off" required>
     <button id="go" type="submit">Get images</button>
     <button id="paste" type="button" class="ghost">Paste</button>
-    <small class="hint">Supports X (Twitter) and Pixiv links.</small>
+    <small class="hint">Supports X (Twitter), Pixiv and YouTube (thumbnail) links.</small>
     <label class="autosave"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
     <div class="folder" id="folderBox" hidden>
       <input type="text" id="folder" placeholder="Insert your drive folder here..." autocomplete="off">
@@ -136,7 +136,18 @@ function parse(text) {
   if (x) return { site: "x", user: x[1], id: x[2] };
   const px = text.match(/pixiv\.net\/(?:\w+\/)?(?:artworks|i)\/(\d+)|pixiv\.net\/.*[?&]illust_id=(\d+)/i);
   if (px) return { site: "pixiv", user: "pixiv", id: px[1] || px[2] };
+  const yt = text.match(/youtu\.be\/([\w-]{11})|youtube(?:-nocookie)?\.com\/(?:shorts|embed|live|v)\/([\w-]{11})|youtube\.com\/.*[?&]v=([\w-]{11})/i);
+  if (yt) return { site: "youtube", user: "youtube", id: yt[1] || yt[2] || yt[3] };
   return null;
+}
+
+// maxresdefault only exists for some videos (404 otherwise); hqdefault always does.
+async function fetchYoutube({ id }) {
+  const max = `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`;
+  if ((await fetch(max, { method: "HEAD" }).catch(() => null))?.ok) return [max];
+  const hq = `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+  if ((await fetch(hq, { method: "HEAD" }).catch(() => null))?.ok) return [hq];
+  throw new Error("No thumbnail found. The video may be private/deleted.");
 }
 
 // Pixiv's image servers need a Referer a browser page can't send, so go through the pixiv.re mirror.
@@ -161,6 +172,7 @@ async function fetchPixiv({ id }) {
 // Returns image URLs (video posts give their thumbnail).
 async function fetchImages(p) {
   if (p.site === "pixiv") return fetchPixiv(p);
+  if (p.site === "youtube") return fetchYoutube(p);
   const { user, id } = p;
   const res = await fetch(`https://api.fxtwitter.com/${user}/status/${id}`);
   if (res.status === 404) throw new Error("Post not found (deleted or private?)");
@@ -363,7 +375,7 @@ function render() {
 async function run(text) {
   const p = parse(text);
   $("result").hidden = true;
-  if (!p) return setStatus("That doesn't look like an X or Pixiv link.", true);
+  if (!p) return setStatus("That doesn't look like an X, Pixiv or YouTube link.", true);
   $("go").disabled = true;
   setStatus("Fetching…");
   try {

@@ -1,6 +1,6 @@
 # X Pic Grabber
 
-Paste an X post link, get its images, optionally auto-save them to Google Drive.
+Paste an X, Pixiv or YouTube link (YouTube gives the video thumbnail), get its images, optionally auto-save them to Google Drive.
 
 ## One-time Google setup (Drive saving)
 1. Go to https://console.cloud.google.com, create a project.
