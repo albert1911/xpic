@@ -114,7 +114,7 @@
       <input type="text" id="clientId" placeholder="123456-abc.apps.googleusercontent.com" autocomplete="off">
     </label>
     <small>Folder is nested with <code>/</code>, <code>{user}</code> = post author. Override per link with <code>?folder=Memes/Cats</code> or <code>?auto=0</code>.</small>
-    <small>Red Note: drag <a id="bm" class="btn ghost" style="padding:2px 8px">xpic ⬇</a> to your bookmarks bar, then click it while viewing a post.</small>
+    <small>Red Note: drag <a id="bm" class="btn ghost" style="padding:2px 8px">xpic ⬇</a> to your bookmarks bar, then click it while viewing a post. On a phone: <a id="bmCopy" href="#" class="btn ghost" style="padding:2px 8px">copy bookmarklet</a>, save it as a bookmark's URL, then type its name in Chrome's address bar on the post.</small>
   </details>
 </main>
 
@@ -458,6 +458,12 @@ $("bm").href = "javascript:(" + (function (base) {
     window.open(base + "?" + p, "_blank");
   } catch (e) { alert("xpic: " + e.message); }
 }).toString() + ")(" + JSON.stringify(location.origin + location.pathname) + ")";
+
+$("bmCopy").onclick = async (e) => {
+  e.preventDefault();
+  try { await navigator.clipboard.writeText($("bm").href); e.target.textContent = "copied!"; }
+  catch { prompt("Copy this:", $("bm").href); }
+};
 
 if (q.has("xhs")) {
   const urls = q.getAll("img");
