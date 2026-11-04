@@ -2,6 +2,8 @@
 
 Paste an X, Pixiv or YouTube link (YouTube gives the video thumbnail), get its images, optionally auto-save them to Google Drive.
 
+**Red Note (Xiaohongshu):** it can't be fetched from a pasted link (login wall). Instead, drag the **xpic ⬇** bookmarklet from *Google Drive settings* to your bookmarks bar, then click it while viewing a post.
+
 ## One-time Google setup (Drive saving)
 1. Go to https://console.cloud.google.com, create a project.
 2. APIs & Services → Library → enable **Google Drive API**.

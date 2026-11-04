@@ -89,7 +89,7 @@
     <input id="url" type="url" inputmode="url" placeholder="Paste your link here..." autocomplete="off" required>
     <button id="go" type="submit">Get images</button>
     <button id="paste" type="button" class="ghost">Paste</button>
-    <small class="hint">Supports X (Twitter), Pixiv and YouTube (thumbnail) links.</small>
+    <small class="hint">Supports X (Twitter), Pixiv, Red Note (Xiaohongshu) and YouTube (thumbnail) links.</small>
     <label class="autosave"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
     <div class="folder" id="folderBox" hidden>
       <input type="text" id="folder" placeholder="Insert your drive folder here..." autocomplete="off">
@@ -114,6 +114,7 @@
       <input type="text" id="clientId" placeholder="123456-abc.apps.googleusercontent.com" autocomplete="off">
     </label>
     <small>Folder is nested with <code>/</code>, <code>{user}</code> = post author. Override per link with <code>?folder=Memes/Cats</code> or <code>?auto=0</code>.</small>
+    <small>Red Note: drag <a id="bm" class="btn ghost" style="padding:2px 8px">xpic ⬇</a> to your bookmarks bar, then click it while viewing a post.</small>
   </details>
 </main>
 
@@ -138,7 +139,20 @@ function parse(text) {
   if (px) return { site: "pixiv", user: "pixiv", id: px[1] || px[2] };
   const yt = text.match(/youtu\.be\/([\w-]{11})|youtube(?:-nocookie)?\.com\/(?:shorts|embed|live|v)\/([\w-]{11})|youtube\.com\/.*[?&]v=([\w-]{11})/i);
   if (yt) return { site: "youtube", user: "youtube", id: yt[1] || yt[2] || yt[3] };
+  if (/(?:xiaohongshu|rednote)\.com|xhslink\.com/i.test(text)) return { site: "xhs", user: "xhs", id: "" };
   return null;
+}
+
+// Red Note blocks anonymous fetches (login wall), so images come from the bookmarklet in Settings,
+// which reads them from the post page in your own logged-in tab and opens xpic with ?xhs=<id>&img=<url>…
+async function fetchXhs() {
+  throw new Error("Red Note can't be fetched from a link. Open the post, then click the xpic bookmarklet (see Settings).");
+}
+
+async function getBlob(u) {
+  const r = await fetch(u);
+  if (!r.ok) throw new Error("Download failed");
+  return r.blob();
 }
 
 // maxresdefault only exists for some videos (404 otherwise); hqdefault always does.
@@ -173,6 +187,7 @@ async function fetchPixiv({ id }) {
 async function fetchImages(p) {
   if (p.site === "pixiv") return fetchPixiv(p);
   if (p.site === "youtube") return fetchYoutube(p);
+  if (p.site === "xhs") return fetchXhs(p);
   const { user, id } = p;
   const res = await fetch(`https://api.fxtwitter.com/${user}/status/${id}`);
   if (res.status === 404) throw new Error("Post not found (deleted or private?)");
@@ -308,7 +323,7 @@ async function uploadOne(folderId, u, i) {
   const name = fileName(u, i);
   const { files } = await list(`name='${esc(name)}' and '${folderId}' in parents and trashed=false`);
   if (files.length) return; // already saved
-  const blob = await (await fetch(withSize(u, "orig"))).blob();
+  const blob = await getBlob(withSize(u, "orig"));
   const form = new FormData();
   form.append("metadata", new Blob([JSON.stringify({ name, parents: [folderId] })], { type: "application/json" }));
   form.append("file", blob);
@@ -343,7 +358,7 @@ async function saveToDrive() {
 async function save(u, i) {
   const full = withSize(u, "orig");
   try {
-    const blob = await (await fetch(full)).blob();
+    const blob = await getBlob(full);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = fileName(u, i);
@@ -360,7 +375,7 @@ function render() {
   current.urls.forEach((u, i) => {
     const el = document.createElement("div");
     el.className = "item";
-    el.innerHTML = `<img alt="" loading="lazy"><div class="row">
+    el.innerHTML = `<img alt="" loading="lazy" referrerpolicy="no-referrer"><div class="row">
       <button type="button">Download</button>
       <a class="btn ghost" target="_blank" rel="noopener">Open</a></div>`;
     el.querySelector("img").src = withSize(u, "large");
@@ -372,19 +387,23 @@ function render() {
   $("result").hidden = false;
 }
 
+function show(p, urls) {
+  current = { ...p, urls };
+  setStatus("");
+  render();
+  if (cfg.get("auto", "1") === "1" && q.get("auto") !== "0") saveToDrive();
+}
+
 async function run(text) {
   const p = parse(text);
   $("result").hidden = true;
-  if (!p) return setStatus("That doesn't look like an X, Pixiv or YouTube link.", true);
+  if (!p) return setStatus("That doesn't look like an X, Pixiv, YouTube or Red Note link.", true);
   $("go").disabled = true;
   setStatus("Fetching…");
   try {
     const urls = await fetchImages(p);
     if (!urls.length) return setStatus("No images in that post.", true);
-    current = { ...p, urls };
-    setStatus("");
-    render();
-    if (cfg.get("auto", "1") === "1" && q.get("auto") !== "0") saveToDrive();
+    show(p, urls);
   } catch (e) {
     setStatus(e.message || "Something went wrong.", true);
   } finally {
@@ -418,6 +437,35 @@ $("auto").onchange = (e) => {
   $("folderBox").hidden = !e.target.checked;
 };
 if (!cfg.get("clientId")) $("settings").open = true;
+
+// Red Note bookmarklet: runs on the post page, reads its images, reopens xpic with them.
+$("bm").href = "javascript:(" + (function (base) {
+  try {
+    const v = (x) => (x && x._value !== undefined ? x._value : x);
+    const id = (location.pathname.match(/[0-9a-f]{24}/) || [])[0] || "";
+    let u = [];
+    try {
+      const n = v(window.__INITIAL_STATE__.note), m = v(n.noteDetailMap);
+      const d = v(m[id] || m[v(n.currentNoteId)] || Object.values(m)[0]);
+      u = v(d.note).imageList.map((i) => i.urlDefault || i.url || (i.infoList && i.infoList[0] && i.infoList[0].url));
+    } catch (e) {}
+    if (!u.length) u = [...document.querySelectorAll('meta[name="og:image"],meta[property="og:image"]')].map((m) => m.content);
+    u = [...new Set(u.filter(Boolean).map((x) => x.replace(/^\/\//, "https://").replace(/^http:/, "https:")))];
+    if (!u.length) return alert("xpic: no images found on this page");
+    const p = new URLSearchParams();
+    p.set("xhs", id || "note");
+    u.forEach((x) => p.append("img", x));
+    window.open(base + "?" + p, "_blank");
+  } catch (e) { alert("xpic: " + e.message); }
+}).toString() + ")(" + JSON.stringify(location.origin + location.pathname) + ")";
+
+if (q.has("xhs")) {
+  const urls = q.getAll("img");
+  const keep = new URLSearchParams();
+  for (const k of ["folder", "auto"]) if (q.has(k)) keep.set(k, q.get(k));
+  history.replaceState(null, "", location.pathname + (keep.size ? `?${keep}` : ""));
+  if (urls.length) show({ site: "xhs", user: "xhs", id: q.get("xhs") }, urls);
+}
 
 // Opened via share sheet (?url= / ?text=) or ?u=
 const shared = q.get("url") || q.get("text") || q.get("u");
