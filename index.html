@@ -206,7 +206,12 @@ const fileName = (u, i) => `${current.user}-${current.id}-${i + 1}${extOf(u)}`;
 // ---- Google Drive ----
 let token = null, tokenExp = 0;
 
-function getToken() {
+async function gsiReady() {
+  for (let i = 0; i < 100 && !window.google?.accounts; i++) await new Promise((r) => setTimeout(r, 100));
+}
+
+async function getToken() {
+  if (!(token && Date.now() < tokenExp) && cfg.get("clientId")) await gsiReady();
   return new Promise((resolve, reject) => {
     if (token && Date.now() < tokenExp) return resolve(token);
     const clientId = cfg.get("clientId");
