@@ -496,7 +496,17 @@ $("bm").href = "javascript:(" + (function (base) {
       const page = () => {
         const sp = document.querySelector("shreddit-post");
         const c = (sp && sp.getAttribute("content-href")) || "";
-        const u = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(c) ? [c] : [...document.querySelectorAll('meta[property="og:image"]')].map((m) => m.content);
+        let u = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(c) ? [c] : [];
+        if (!u.length) {
+          const imgs = document.querySelectorAll('shreddit-post img, gallery-carousel img, [slot="post-media-container"] img');
+          for (const i of imgs) {
+            const src = i.getAttribute("src") || i.getAttribute("data-lazy-src") || "";
+            const f = (src.match(/redd\.it\/([\w-]+\.\w+)/) || [])[1];
+            if (f) u.push("https://i.redd.it/" + f);
+          }
+        }
+        if (!u.length) u = [...document.querySelectorAll('meta[property="og:image"]')].map((m) => m.content);
+        if (!u.length) throw new Error("no image found in the page");
         open("reddit", (location.pathname.match(/\/r\/(\w+)/) || [])[1] || "reddit", m0 ? m0[1] : "post", u, true);
       };
       fetch(location.pathname.replace(/\/$/, "") + ".json?raw_json=1", { credentials: "include" })
@@ -515,9 +525,10 @@ $("bm").href = "javascript:(" + (function (base) {
             }
           } else if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(d.url || "")) u.push(d.url);
           else if (d.preview && d.preview.images[0]) u.push(d.preview.images[0].source.url);
+          if (!u.length) throw new Error("Reddit gave no images (gallery:" + !!d.gallery_data + " meta:" + !!d.media_metadata + " hint:" + d.post_hint + " 18+:" + d.over_18 + " url:" + String(d.url).slice(0, 50) + ")");
           open("reddit", d.subreddit || "reddit", d.id, u, true);
         })
-        .catch((e) => { try { page(); } catch (e2) { alert("xpic: " + e.message); } });
+        .catch((e) => { try { page(); } catch (e2) { alert("xpic: " + e.message + " / " + e2.message); } });
       return;
     }
     const v = (x) => (x && x._value !== undefined ? x._value : x);
