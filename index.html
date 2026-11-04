@@ -61,6 +61,7 @@
   .pill { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--card); font-size: .85rem; }
   .pill button { background: none; border: 0; color: inherit; padding: 4px 10px; border-radius: 999px; font-size: inherit; cursor: pointer; }  input[type=checkbox] { flex: none; accent-color: var(--accent); cursor: pointer; }
   details small { display: block; margin-top: 12px; }
+  .text-nowrap { white-space: nowrap; }
   .bar { flex-wrap: wrap; gap: 8px; }
   .bar .btns { display: flex; gap: 8px; }
   code { word-break: break-all; }
@@ -89,7 +90,7 @@
     <input id="url" type="url" inputmode="url" placeholder="Paste your link here..." autocomplete="off" required>
     <button id="go" type="submit">Get images</button>
     <button id="paste" type="button" class="ghost">Paste</button>
-    <small class="hint">Supports X (Twitter), Pixiv, Red Note (Xiaohongshu) and YouTube (thumbnail) links.</small>
+    <small class="hint">Supports X (Twitter), Pixiv, YouTube (thumbnail), Red Note and Lofter (these two via the bookmarklet in Settings) links.</small>
     <label class="autosave"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
     <div class="folder" id="folderBox" hidden>
       <input type="text" id="folder" placeholder="Insert your drive folder here..." autocomplete="off">
@@ -114,7 +115,12 @@
       <input type="text" id="clientId" placeholder="123456-abc.apps.googleusercontent.com" autocomplete="off">
     </label>
     <small>Folder is nested with <code>/</code>, <code>{user}</code> = post author. Override per link with <code>?folder=Memes/Cats</code> or <code>?auto=0</code>.</small>
-    <small>Red Note: drag <a id="bm" class="btn ghost" style="padding:2px 8px">xpic ⬇</a> to your bookmarks bar, then click it while viewing a post. On a phone: <a id="bmCopy" href="#" class="btn ghost" style="padding:2px 8px">copy bookmarklet</a>, save it as a bookmark's URL, then type its name in Chrome's address bar on the post.</small>
+    <small>
+      <b>rednote:</b> drag <a id="bm" class="btn ghost" style="padding:2px 8px; font-size: 10px;">XPIC - rednote</a> to your bookmarks 
+      bar, then click it while viewing a post. On a phone: 
+      <a id="bmCopy" href="#" class="btn ghost text-nowrap" style="padding:2px 8px; font-size: 10px;">copy bookmarklet</a>, 
+      save it as a bookmark's URL, then type its name in Chrome's address bar on the post.
+    </small>
   </details>
 </main>
 
@@ -140,13 +146,14 @@ function parse(text) {
   const yt = text.match(/youtu\.be\/([\w-]{11})|youtube(?:-nocookie)?\.com\/(?:shorts|embed|live|v)\/([\w-]{11})|youtube\.com\/.*[?&]v=([\w-]{11})/i);
   if (yt) return { site: "youtube", user: "youtube", id: yt[1] || yt[2] || yt[3] };
   if (/(?:xiaohongshu|rednote)\.com|xhslink\.com/i.test(text)) return { site: "xhs", user: "xhs", id: "" };
+  if (/lofter\.com/i.test(text)) return { site: "lofter", user: "lofter", id: "" };
   return null;
 }
 
 // Red Note blocks anonymous fetches (login wall), so images come from the bookmarklet in Settings,
 // which reads them from the post page in your own logged-in tab and opens xpic with ?xhs=<id>&img=<url>…
 async function fetchXhs() {
-  throw new Error("Red Note can't be fetched from a link. Open the post, then click the xpic bookmarklet (see Settings).");
+  throw new Error("Red Note and Lofter can't be fetched from a link. Open the post, then click the xpic bookmarklet (see Settings).");
 }
 
 async function getBlob(u) {
@@ -187,7 +194,7 @@ async function fetchPixiv({ id }) {
 async function fetchImages(p) {
   if (p.site === "pixiv") return fetchPixiv(p);
   if (p.site === "youtube") return fetchYoutube(p);
-  if (p.site === "xhs") return fetchXhs(p);
+  if (p.site === "xhs" || p.site === "lofter") return fetchXhs(p);
   const { user, id } = p;
   const res = await fetch(`https://api.fxtwitter.com/${user}/status/${id}`);
   if (res.status === 404) throw new Error("Post not found (deleted or private?)");
@@ -392,17 +399,18 @@ function render() {
   $("result").hidden = false;
 }
 
+const LOGIN_WALL = new Set(["xhs", "lofter"]); // images come from the bookmarklet, not auto-saved
 function show(p, urls) {
   current = { ...p, urls };
   setStatus("");
   render();
-  if (p.site !== "xhs" && cfg.get("auto", "1") === "1" && q.get("auto") !== "0") saveToDrive(); // Red Note: tap Save to Drive yourself
+  if (!LOGIN_WALL.has(p.site) && cfg.get("auto", "1") === "1" && q.get("auto") !== "0") saveToDrive(); // login-wall sites: tap Save to Drive yourself
 }
 
 async function run(text) {
   const p = parse(text);
   $("result").hidden = true;
-  if (!p) return setStatus("That doesn't look like an X, Pixiv, YouTube or Red Note link.", true);
+  if (!p) return setStatus("That doesn't look like an X, Pixiv, YouTube, Red Note or Lofter link.", true);
   $("go").disabled = true;
   setStatus("Fetching…");
   try {
@@ -443,22 +451,39 @@ $("auto").onchange = (e) => {
 };
 if (!cfg.get("clientId")) $("settings").open = true;
 
-// Red Note bookmarklet: runs on the post page, reads its images, reopens xpic with them.
+// Bookmarklet for sites behind a login wall (Red Note, Lofter): runs on the post page in your logged-in tab,
+// reads its images, and reopens xpic with ?site=<xhs|lofter>&user=&id=&img=<url>…
 $("bm").href = "javascript:(" + (function (base) {
   try {
     const v = (x) => (x && x._value !== undefined ? x._value : x);
-    const id = (location.pathname.match(/[0-9a-f]{24}/) || [])[0] || "";
-    let u = [];
-    try {
-      const n = v(window.__INITIAL_STATE__.note), m = v(n.noteDetailMap);
-      const d = v(m[id] || m[v(n.currentNoteId)] || Object.values(m)[0]);
-      u = v(d.note).imageList.map((i) => i.urlDefault || i.url || (i.infoList && i.infoList[0] && i.infoList[0].url));
-    } catch (e) {}
-    if (!u.length) u = [...document.querySelectorAll('meta[name="og:image"],meta[property="og:image"]')].map((m) => m.content);
-    u = [...new Set(u.filter(Boolean).map((x) => x.replace(/^\/\//, "https://").replace(/^http:/, "https:")))];
+    const fix = (x) => x.replace(/^\/\//, "https://").replace(/^http:/, "https:");
+    let site = "", user = "", id = "", u = [];
+    if (/lofter\.com$/.test(location.hostname)) {
+      site = "lofter";
+      user = location.hostname.split(".")[0];
+      id = (location.pathname.match(/\/post\/([\w-]+)/) || [])[1] || "post";
+      for (const i of document.querySelectorAll("img")) {
+        const s = i.getAttribute("data-origin") || i.getAttribute("data-src") || i.getAttribute("data-original") || i.src || "";
+        if (!/lf127\.net|nosdn|netease/.test(s) || /avatar|head|logo|icon/i.test(s + i.className)) continue;
+        if (i.complete && i.naturalWidth && i.naturalWidth < 200) continue;
+        u.push(s.split("?")[0]); // dropping the query gives the original, not the resized copy
+      }
+      for (const a of document.querySelectorAll("a[href]")) if (/lf127\.net.*\.(jpe?g|png|gif|webp)/i.test(a.href)) u.push(a.href.split("?")[0]);
+    } else {
+      site = "xhs";
+      user = "xhs";
+      id = (location.pathname.match(/[0-9a-f]{24}/) || [])[0] || "";
+      try {
+        const n = v(window.__INITIAL_STATE__.note), m = v(n.noteDetailMap);
+        const d = v(m[id] || m[v(n.currentNoteId)] || Object.values(m)[0]);
+        u = v(d.note).imageList.map((i) => i.urlDefault || i.url || (i.infoList && i.infoList[0] && i.infoList[0].url));
+      } catch (e) {}
+      if (!u.length) u = [...document.querySelectorAll('meta[name="og:image"],meta[property="og:image"]')].map((m) => m.content);
+      id = id || "note";
+    }
+    u = [...new Set(u.filter(Boolean).map(fix))];
     if (!u.length) return alert("xpic: no images found on this page");
-    const p = new URLSearchParams();
-    p.set("xhs", id || "note");
+    const p = new URLSearchParams({ site, user, id });
     u.forEach((x) => p.append("img", x));
     window.open(base + "?" + p, "_blank");
   } catch (e) { alert("xpic: " + e.message); }
@@ -470,12 +495,14 @@ $("bmCopy").onclick = async (e) => {
   catch { prompt("Copy this:", $("bm").href); }
 };
 
-if (q.has("xhs")) {
+if (q.has("site") || q.has("xhs")) {
   const urls = q.getAll("img");
   const keep = new URLSearchParams();
   for (const k of ["folder", "auto"]) if (q.has(k)) keep.set(k, q.get(k));
   history.replaceState(null, "", location.pathname + (keep.size ? `?${keep}` : ""));
-  if (urls.length) show({ site: "xhs", user: "xhs", id: q.get("xhs") }, urls);
+  if (urls.length) show(q.has("site")
+    ? { site: q.get("site"), user: q.get("user") || q.get("site"), id: q.get("id") }
+    : { site: "xhs", user: "xhs", id: q.get("xhs") }, urls);
 }
 
 // Opened via share sheet (?url= / ?text=) or ?u=
