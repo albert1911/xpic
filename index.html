@@ -483,18 +483,24 @@ if (!cfg.get("clientId")) $("settings").open = true;
 // Bookmarklet (no // comments inside it: it's flattened to one line): runs on the post page in your own tab (Red Note needs your login; Reddit blocks cross-site requests,
 // but allows them from reddit.com itself), reads the images, and reopens xpic with ?site=&user=&id=&img=…
 $("bm").href = "javascript:(" + (function (base) {
-  const open = (site, user, id, u, w) => {
+  const open = (site, user, id, u, same) => {
     u = [...new Set(u.filter(Boolean).map((x) => x.replace(/^\/\//, "https://").replace(/^http:/, "https:")))];
-    if (!u.length) { if (w) w.close(); return alert("xpic: no images found on this page"); }
+    if (!u.length) return alert("xpic: no images found on this page");
     const p = new URLSearchParams({ site, user, id });
     u.forEach((x) => p.append("img", x));
-    if (w) w.location = base + "?" + p; else window.open(base + "?" + p, "_blank");
+    if (same) location.href = base + "?" + p; else window.open(base + "?" + p, "_blank");
   };
   try {
     if (/(^|\.)reddit\.com$/.test(location.hostname)) {
-      const w = window.open("", "_blank");
-      fetch(location.pathname.replace(/\/$/, "") + ".json?raw_json=1")
-        .then((r) => r.json())
+      const m0 = location.pathname.match(/\/comments\/(\w+)/);
+      const page = () => {
+        const sp = document.querySelector("shreddit-post");
+        const c = (sp && sp.getAttribute("content-href")) || "";
+        const u = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(c) ? [c] : [...document.querySelectorAll('meta[property="og:image"]')].map((m) => m.content);
+        open("reddit", (location.pathname.match(/\/r\/(\w+)/) || [])[1] || "reddit", m0 ? m0[1] : "post", u, true);
+      };
+      fetch(location.pathname.replace(/\/$/, "") + ".json?raw_json=1", { credentials: "include" })
+        .then((r) => { if (!r.ok) throw new Error("Reddit returned " + r.status); return r.json(); })
         .then((j) => {
           let d = j[0].data.children[0].data;
           d = (d.crosspost_parent_list || [])[0] || d;
@@ -509,9 +515,9 @@ $("bm").href = "javascript:(" + (function (base) {
             }
           } else if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(d.url || "")) u.push(d.url);
           else if (d.preview && d.preview.images[0]) u.push(d.preview.images[0].source.url);
-          open("reddit", d.subreddit || "reddit", d.id, u, w);
+          open("reddit", d.subreddit || "reddit", d.id, u, true);
         })
-        .catch((e) => { if (w) w.close(); alert("xpic: " + e.message); });
+        .catch((e) => { try { page(); } catch (e2) { alert("xpic: " + e.message); } });
       return;
     }
     const v = (x) => (x && x._value !== undefined ? x._value : x);
