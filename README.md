@@ -2,7 +2,7 @@
 
 Paste an X, Pixiv or YouTube link (YouTube gives the video thumbnail), get its images, optionally auto-save them to Google Drive.
 
-**Red Note (Xiaohongshu) and Lofter:** these can't be fetched from a pasted link (login wall). Instead, drag the **xpic ⬇** bookmarklet from *Google Drive settings* to your bookmarks bar, then click it while viewing a post.
+**Red Note (Xiaohongshu):** it can't be fetched from a pasted link (login wall). Instead, drag the **xpic ⬇** bookmarklet from *Google Drive settings* to your bookmarks bar, then click it while viewing a post.
 
 **Red Note on Android:** install Firefox, add the Violentmonkey extension, open the raw [xpic-rednote.user.js](https://raw.githubusercontent.com/albert1911/xpic/main/xpic-rednote.user.js) and install it. Open a post in Firefox (logged in) and tap the floating **xpic ⬇** button.
 
