@@ -89,7 +89,7 @@
     <input id="url" type="url" inputmode="url" placeholder="Paste your link here..." autocomplete="off" required>
     <button id="go" type="submit">Get images</button>
     <button id="paste" type="button" class="ghost">Paste</button>
-    <small class="hint">Supports X (Twitter), Pixiv, Red Note (Xiaohongshu) and YouTube (thumbnail) links.</small>
+    <small class="hint">Paste an X (Twitter), Pixiv or YouTube (thumbnail) link. <br>Reddit and rednote only work through the bookmarklet in Settings below.</small>
     <label class="autosave"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
     <div class="folder" id="folderBox" hidden>
       <input type="text" id="folder" placeholder="Insert your drive folder here..." autocomplete="off">
@@ -115,8 +115,8 @@
     </label>
     <small>Folder is nested with <code>/</code>, <code>{user}</code> = post author. Override per link with <code>?folder=Memes/Cats</code> or <code>?auto=0</code>.</small>
     <small>
-      <b>rednote</b>: drag <a id="bm" class="btn ghost" style="padding:2px 8px; font-size: 10px;">XPIC - rednote</a> to your bookmarks 
-      bar, then click it while viewing a post. On a phone: 
+      <b>Bookmarklet</b>: drag <a id="bm" class="btn ghost" style="padding:2px 8px; font-size: 10px;">XPIC</a> 
+      to your bookmarks bar, then click it while viewing a post. On a phone: 
       <a id="bmCopy" href="#" class="btn ghost" style="padding:2px 8px; font-size: 10px; white-space: nowrap;">copy bookmarklet</a>, 
       save it as a bookmark's URL, then type its name in Chrome's address bar on the post.
     </small>
@@ -144,6 +144,9 @@ function parse(text) {
   if (px) return { site: "pixiv", user: "pixiv", id: px[1] || px[2] };
   const yt = text.match(/youtu\.be\/([\w-]{11})|youtube(?:-nocookie)?\.com\/(?:shorts|embed|live|v)\/([\w-]{11})|youtube\.com\/.*[?&]v=([\w-]{11})/i);
   if (yt) return { site: "youtube", user: "youtube", id: yt[1] || yt[2] || yt[3] };
+  const rd = text.match(/reddit\.com\/r\/(\w+)\/comments\/(\w+)|reddit\.com\/comments\/(\w+)|(?<![\w.])redd\.it\/(\w+)/i);
+  if (rd) return { site: "reddit", user: rd[1] || "reddit", id: rd[2] || rd[3] || rd[4] };
+  if (/reddit\.com\/r\/\w+\/s\//i.test(text)) return { site: "reddit", user: "reddit", id: "" };
   if (/(?:xiaohongshu|rednote)\.com|xhslink\.com/i.test(text)) return { site: "xhs", user: "xhs", id: "" };
   return null;
 }
@@ -158,6 +161,34 @@ async function getBlob(u) {
   const r = await fetch(u);
   if (!r.ok) throw new Error("Download failed");
   return r.blob();
+}
+
+// Reddit's public JSON: https://www.reddit.com/comments/<id>.json. Galleries list images in media_metadata, in gallery_data order.
+async function fetchReddit(p) {
+  const { id } = p;
+  if (!id) throw new Error("Reddit share links can't be read here. Open the post in Chrome and use the xpic bookmarklet (see Settings).");
+  const res = await fetch(`https://www.reddit.com/comments/${id}.json?raw_json=1`).catch(() => null);
+  if (!res) throw new Error("Reddit blocks this from a web page. Open the post on reddit.com in Chrome and use the xpic bookmarklet (see Settings).");
+  if (res.status === 404) throw new Error("Post not found (deleted or private?)");
+  if (!res.ok) throw new Error(`Reddit lookup failed (${res.status})`);
+  let post = (await res.json())[0]?.data?.children?.[0]?.data;
+  post = post?.crosspost_parent_list?.[0] ?? post;
+  if (!post) throw new Error("Couldn't read that Reddit post.");
+  const urls = [];
+  if (post.gallery_data?.items && post.media_metadata) {
+    for (const { media_id } of post.gallery_data.items) {
+      const m = post.media_metadata[media_id];
+      if (m?.status !== "valid") continue;
+      const f = (m.s?.u ?? m.s?.gif ?? "").match(/\/([\w-]+\.\w+)(\?|$)/)?.[1]; // real file name incl. extension
+      urls.push(`https://i.redd.it/${f ?? media_id + ".jpg"}`);
+    }
+  } else if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(post.url ?? "")) {
+    urls.push(post.url);
+  } else if (post.preview?.images?.[0]?.source?.url) {
+    urls.push(post.preview.images[0].source.url); // video / link posts: thumbnail
+  }
+  if (post.subreddit && p.user === "reddit") p.user = post.subreddit; // used for the {user} folder / filenames
+  return urls;
 }
 
 // maxresdefault only exists for some videos (404 otherwise); hqdefault always does.
@@ -192,6 +223,7 @@ async function fetchPixiv({ id }) {
 async function fetchImages(p) {
   if (p.site === "pixiv") return fetchPixiv(p);
   if (p.site === "youtube") return fetchYoutube(p);
+  if (p.site === "reddit") return fetchReddit(p);
   if (p.site === "xhs") return fetchXhs(p);
   const { user, id } = p;
   const res = await fetch(`https://api.fxtwitter.com/${user}/status/${id}`);
@@ -397,17 +429,17 @@ function render() {
   $("result").hidden = false;
 }
 
-function show(p, urls) {
+function show(p, urls, manual = false) {
   current = { ...p, urls };
   setStatus("");
   render();
-  if (p.site !== "xhs" && cfg.get("auto", "1") === "1" && q.get("auto") !== "0") saveToDrive(); // Red Note: tap Save to Drive yourself
+  if (!manual && cfg.get("auto", "1") === "1" && q.get("auto") !== "0") saveToDrive(); // bookmarklet posts: tap Save to Drive yourself, so you can pick the folder first
 }
 
 async function run(text) {
   const p = parse(text);
   $("result").hidden = true;
-  if (!p) return setStatus("That doesn't look like an X, Pixiv, YouTube or Red Note link.", true);
+  if (!p) return setStatus("That doesn't look like an X, Pixiv, YouTube, Reddit or Red Note link.", true);
   $("go").disabled = true;
   setStatus("Fetching…");
   try {
@@ -448,9 +480,40 @@ $("auto").onchange = (e) => {
 };
 if (!cfg.get("clientId")) $("settings").open = true;
 
-// Red Note bookmarklet: runs on the post page, reads its images, reopens xpic with them.
+// Bookmarklet (no // comments inside it: it's flattened to one line): runs on the post page in your own tab (Red Note needs your login; Reddit blocks cross-site requests,
+// but allows them from reddit.com itself), reads the images, and reopens xpic with ?site=&user=&id=&img=…
 $("bm").href = "javascript:(" + (function (base) {
+  const open = (site, user, id, u, w) => {
+    u = [...new Set(u.filter(Boolean).map((x) => x.replace(/^\/\//, "https://").replace(/^http:/, "https:")))];
+    if (!u.length) { if (w) w.close(); return alert("xpic: no images found on this page"); }
+    const p = new URLSearchParams({ site, user, id });
+    u.forEach((x) => p.append("img", x));
+    if (w) w.location = base + "?" + p; else window.open(base + "?" + p, "_blank");
+  };
   try {
+    if (/(^|\.)reddit\.com$/.test(location.hostname)) {
+      const w = window.open("", "_blank");
+      fetch(location.pathname.replace(/\/$/, "") + ".json?raw_json=1")
+        .then((r) => r.json())
+        .then((j) => {
+          let d = j[0].data.children[0].data;
+          d = (d.crosspost_parent_list || [])[0] || d;
+          let u = [];
+          if (d.gallery_data && d.media_metadata) {
+            for (const { media_id: k } of d.gallery_data.items) {
+              const m = d.media_metadata[k];
+              if (!m || m.status !== "valid") continue;
+              const src = (m.s && (m.s.u || m.s.gif)) || "";
+              const f = (src.match(/\/([\w-]+\.\w+)(\?|$)/) || [])[1];
+              u.push("https://i.redd.it/" + (f || k + ".jpg"));
+            }
+          } else if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(d.url || "")) u.push(d.url);
+          else if (d.preview && d.preview.images[0]) u.push(d.preview.images[0].source.url);
+          open("reddit", d.subreddit || "reddit", d.id, u, w);
+        })
+        .catch((e) => { if (w) w.close(); alert("xpic: " + e.message); });
+      return;
+    }
     const v = (x) => (x && x._value !== undefined ? x._value : x);
     const id = (location.pathname.match(/[0-9a-f]{24}/) || [])[0] || "";
     let u = [];
@@ -460,12 +523,7 @@ $("bm").href = "javascript:(" + (function (base) {
       u = v(d.note).imageList.map((i) => i.urlDefault || i.url || (i.infoList && i.infoList[0] && i.infoList[0].url));
     } catch (e) {}
     if (!u.length) u = [...document.querySelectorAll('meta[name="og:image"],meta[property="og:image"]')].map((m) => m.content);
-    u = [...new Set(u.filter(Boolean).map((x) => x.replace(/^\/\//, "https://").replace(/^http:/, "https:")))];
-    if (!u.length) return alert("xpic: no images found on this page");
-    const p = new URLSearchParams();
-    p.set("xhs", id || "note");
-    u.forEach((x) => p.append("img", x));
-    window.open(base + "?" + p, "_blank");
+    open("xhs", "xhs", id || "note", u);
   } catch (e) { alert("xpic: " + e.message); }
 }).toString() + ")(" + JSON.stringify(location.origin + location.pathname) + ")";
 
@@ -475,12 +533,14 @@ $("bmCopy").onclick = async (e) => {
   catch { prompt("Copy this:", $("bm").href); }
 };
 
-if (q.has("xhs")) {
+if (q.has("site") || q.has("xhs")) {
   const urls = q.getAll("img");
   const keep = new URLSearchParams();
   for (const k of ["folder", "auto"]) if (q.has(k)) keep.set(k, q.get(k));
   history.replaceState(null, "", location.pathname + (keep.size ? `?${keep}` : ""));
-  if (urls.length) show({ site: "xhs", user: "xhs", id: q.get("xhs") }, urls);
+  if (urls.length) show(q.has("site")
+    ? { site: q.get("site"), user: q.get("user") || q.get("site"), id: q.get("id") }
+    : { site: "xhs", user: "xhs", id: q.get("xhs") }, urls, true);
 }
 
 // Opened via share sheet (?url= / ?text=) or ?u=
