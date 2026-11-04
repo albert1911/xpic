@@ -396,7 +396,7 @@ function show(p, urls) {
   current = { ...p, urls };
   setStatus("");
   render();
-  if (cfg.get("auto", "1") === "1" && q.get("auto") !== "0") saveToDrive();
+  if (p.site !== "xhs" && cfg.get("auto", "1") === "1" && q.get("auto") !== "0") saveToDrive(); // Red Note: tap Save to Drive yourself
 }
 
 async function run(text) {
