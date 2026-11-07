@@ -22,7 +22,12 @@ export default {
     if (target.hostname === "api.bilibili.com" && target.pathname !== BILI_API) {
       return new Response("path not allowed", { status: 403, headers: cors });
     }
-    const headers = { "User-Agent": "Mozilla/5.0" };
+    const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36" };
+    if (target.hostname === "api.bilibili.com") {
+      headers.Referer = "https://www.bilibili.com/";
+      headers.Accept = "application/json, text/plain, */*";
+      headers["Accept-Language"] = "en-US,en;q=0.9";
+    }
     if (/sinaimg\.cn$/.test(target.hostname)) headers.Referer = "https://weibo.com/"; // Weibo images 403 without it
     const r = await fetch(target, { headers });
     return new Response(r.body, {

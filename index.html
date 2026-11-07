@@ -192,7 +192,9 @@ async function fetchBilibili(p) {
   const proxy = cfg.get("proxy");
   if (!proxy) throw new Error("Bilibili needs an image proxy. Set one in Settings (see worker/image-proxy.js).");
   const res = await fetch(`${proxy}${proxy.includes("?") ? "&" : "?"}url=${encodeURIComponent(api)}`).catch(() => null);
-  if (!res?.ok) throw new Error(`Bilibili lookup failed (${res ? res.status : "proxy unreachable"}). Redeploy the proxy worker?`);
+  if (res?.status === 412) throw new Error("Bilibili refused the request (412), often because it blocks the proxy's server IPs. Try again, or tell me if it keeps happening.");
+  if (res?.status === 403) throw new Error("The proxy refused the request (403). Redeploy worker/image-proxy.js with Bilibili support.");
+  if (!res?.ok) throw new Error(`Bilibili lookup failed (${res ? res.status : "proxy unreachable"}).`);
   const j = await res.json();
   if (j.code === -352) throw new Error("Bilibili blocked the lookup (risk control). Try again later.");
   if (j.code) throw new Error(`Post not found or private (Bilibili code ${j.code}).`);
