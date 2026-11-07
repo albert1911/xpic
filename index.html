@@ -538,7 +538,7 @@ $("bm").href = "javascript:(" + (function (base) {
     if (!u.length) return alert("xpic: no images found on this page");
     const p = new URLSearchParams({ site, user, id });
     u.forEach((x) => p.append("img", x));
-    if (same) location.href = base + "?" + p; else window.open(base + "?" + p, "_blank");
+    if (same && same !== true) same.location.href = base + "?" + p; else if (same) location.href = base + "?" + p; else window.open(base + "?" + p, "_blank");
   };
   try {
     if (/(^|\.)reddit\.com$/.test(location.hostname)) {
@@ -575,6 +575,8 @@ $("bm").href = "javascript:(" + (function (base) {
       const bid = m ? m[m.length - 1] : "";
       const uid = m && m.length === 3 ? m[1] : "weibo";
       if (!bid) return alert("xpic: open a single Weibo post first");
+      const tab = window.open("about:blank", "_blank");
+      const fail = (m) => { if (tab) tab.close(); alert(m); };
       const xsrf = (document.cookie.match(/XSRF-TOKEN=([^;]+)/) || [])[1] || "";
       fetch("/ajax/statuses/show?id=" + bid + "&locale=en-US&isGetLongText=true", { credentials: "include", headers: { "x-requested-with": "XMLHttpRequest", "x-xsrf-token": xsrf } })
         .then((r) => { if (!r.ok) throw new Error("Weibo returned " + r.status); return r.json(); })
@@ -586,10 +588,10 @@ $("bm").href = "javascript:(" + (function (base) {
           let u = (d.pic_ids || []).map((k) => best(info[k]) || "https://wx1.sinaimg.cn/large/" + k + ".jpg");
           if (!u.length && d.mix_media_info) u = (d.mix_media_info.items || []).map((m) => m.type === "pic" && m.data ? best(m.data) : m.data && m.data.pic_info && best(m.data.pic_info)).filter(Boolean);
           if (!u.length && d.page_info && d.page_info.page_pic) u = [d.page_info.page_pic.url || d.page_info.page_pic];
-          if (!u.length) return alert("xpic (weibo): no images in this post. Keys: " + Object.keys(d).slice(0, 25).join(","));
-          open("weibo", (d.user && d.user.idstr) || uid, bid, u, true);
+          if (!u.length) return fail("xpic (weibo): no images in this post. Keys: " + Object.keys(d).slice(0, 25).join(","));
+          open("weibo", (d.user && d.user.idstr) || uid, bid, u, tab || true);
         })
-        .catch((e) => alert("xpic (weibo): " + e.message));
+        .catch((e) => fail("xpic (weibo): " + e.message));
       return;
     }
     const v = (x) => (x && x._value !== undefined ? x._value : x);
