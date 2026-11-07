@@ -93,7 +93,7 @@
     <input id="url" type="url" inputmode="url" placeholder="Paste your link here..." autocomplete="off" required>
     <button id="go" type="submit">Get images</button>
     <button id="paste" type="button" class="ghost">Paste</button>
-    <small class="hint">Paste an X (Twitter), Pixiv or YouTube (thumbnail) link. <br>Reddit and rednote only work through the bookmarklet in Settings below.</small>
+    <small class="hint">Paste an X (Twitter), Pixiv or YouTube (thumbnail) link. <br>Reddit, Weibo and rednote only work through the bookmarklet in Settings below.</small>
     <label class="autosave"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
     <div class="folder" id="folderBox" hidden>
       <input type="text" id="folder" placeholder="Insert your drive folder here..." autocomplete="off">
@@ -155,7 +155,14 @@ function parse(text) {
   if (rd) return { site: "reddit", user: rd[1] || "reddit", id: rd[2] || rd[3] || rd[4] };
   if (/reddit\.com\/r\/\w+\/s\//i.test(text)) return { site: "reddit", user: "reddit", id: "" };
   if (/(?:xiaohongshu|rednote)\.com|xhslink\.com/i.test(text)) return { site: "xhs", user: "xhs", id: "" };
+  const wb = text.match(/(?:weibo\.com|weibo\.cn)\/(?:detail\/(\w+)|(\d+)\/(\w+))/i);
+  if (wb) return { site: "weibo", user: wb[2] || "weibo", id: wb[1] || wb[3] };
   return null;
+}
+
+// Weibo needs login/cookies and has no CORS, so images come from the bookmarklet (runs on weibo.com itself).
+async function fetchWeibo() {
+  throw new Error("Weibo can't be fetched from a link. Open the post on weibo.com, then click the xpic bookmarklet (see Settings).");
 }
 
 // Red Note blocks anonymous fetches (login wall), so images come from the bookmarklet in Settings,
@@ -238,6 +245,7 @@ async function fetchImages(p) {
   if (p.site === "youtube") return fetchYoutube(p);
   if (p.site === "reddit") return fetchReddit(p);
   if (p.site === "xhs") return fetchXhs(p);
+  if (p.site === "weibo") return fetchWeibo(p);
   const { user, id } = p;
   const res = await fetch(`https://api.fxtwitter.com/${user}/status/${id}`);
   if (res.status === 404) throw new Error("Post not found (deleted or private?)");
@@ -471,7 +479,7 @@ function show(p, urls, manual = false) {
 async function run(text) {
   const p = parse(text);
   $("result").hidden = true;
-  if (!p) return setStatus("That doesn't look like an X, Pixiv, YouTube, Reddit or Red Note link.", true);
+  if (!p) return setStatus("That doesn't look like an X, Pixiv, YouTube, Reddit, Weibo or Red Note link.", true);
   $("go").disabled = true;
   setStatus("Fetching…");
   try {
@@ -552,6 +560,22 @@ $("bm").href = "javascript:(" + (function (base) {
           open("reddit", d.subreddit || "reddit", d.id, u, true);
         })
         .catch((e) => { try { page(); } catch (e2) { alert("xpic: " + e.message); } });
+      return;
+    }
+    if (/(^|\.)weibo\.(com|cn)$/.test(location.hostname)) {
+      const m = location.pathname.match(/\/(\d+)\/(\w+)\/?$/) || location.pathname.match(/\/detail\/(\w+)/);
+      const bid = m ? m[m.length - 1] : "";
+      const uid = m && m.length === 3 ? m[1] : "weibo";
+      if (!bid) return alert("xpic: open a single Weibo post first");
+      fetch("/ajax/statuses/show?id=" + bid, { credentials: "include" })
+        .then((r) => { if (!r.ok) throw new Error("Weibo returned " + r.status); return r.json(); })
+        .then((d) => {
+          d = d.retweeted_status && !(d.pic_ids || []).length ? d.retweeted_status : d;
+          const info = d.pic_infos || {};
+          const u = (d.pic_ids || []).map((k) => (info[k] && (info[k].largest || info[k].original || info[k].large) || {}).url || "https://wx1.sinaimg.cn/large/" + k + ".jpg");
+          open("weibo", (d.user && d.user.idstr) || uid, bid, u, true);
+        })
+        .catch((e) => alert("xpic: " + e.message));
       return;
     }
     const v = (x) => (x && x._value !== undefined ? x._value : x);
