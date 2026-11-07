@@ -460,9 +460,17 @@ function render() {
     el.innerHTML = `<img alt="" loading="lazy" referrerpolicy="no-referrer"><div class="row">
       <button type="button">Download</button>
       <a class="btn ghost" target="_blank" rel="noopener">Open</a></div>`;
-    el.querySelector("img").src = withSize(u, "large");
+    const img = el.querySelector("img"), open = el.querySelector("a");
     el.querySelector("button").onclick = () => save(u, i);
-    el.querySelector("a").href = withSize(u, "orig");
+    if (/sinaimg\.cn/.test(u)) {
+      // Needs a weibo.com Referer a page can't send: load through the proxy (Settings) as a blob.
+      open.href = u;
+      getBlob(u).then((b) => { img.src = open.href = URL.createObjectURL(b); })
+        .catch(() => { img.alt = "Preview blocked. Set an image proxy in Settings."; });
+    } else {
+      img.src = withSize(u, "large");
+      open.href = withSize(u, "orig");
+    }
     grid.append(el);
   });
   $("count").textContent = `${current.urls.length} image${current.urls.length === 1 ? "" : "s"}`;

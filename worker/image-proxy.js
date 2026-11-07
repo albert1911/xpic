@@ -2,7 +2,7 @@
 // Usage: GET https://<your-worker>.workers.dev/?url=<encoded image url>
 
 const ORIGINS = ["https://albert1911.github.io"]; // pages allowed to use this proxy
-const HOSTS = /^([\w-]+\.)*(redd\.it|xhscdn\.com|rednotecdn\.com)$/; // images it may fetch
+const HOSTS = /^([\w-]+\.)*(redd\.it|xhscdn\.com|rednotecdn\.com|sinaimg\.cn)$/; // images it may fetch
 
 export default {
   async fetch(req) {
@@ -18,7 +18,9 @@ export default {
       return new Response("host not allowed", { status: 403, headers: cors });
     }
 
-    const r = await fetch(target, { headers: { "User-Agent": "Mozilla/5.0" } });
+    const headers = { "User-Agent": "Mozilla/5.0" };
+    if (/sinaimg\.cn$/.test(target.hostname)) headers.Referer = "https://weibo.com/"; // Weibo images 403 without it
+    const r = await fetch(target, { headers });
     return new Response(r.body, {
       status: r.status,
       headers: { ...cors, "Content-Type": r.headers.get("Content-Type") || "application/octet-stream", "Cache-Control": "public, max-age=86400" },
