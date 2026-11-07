@@ -545,7 +545,9 @@ $("bm").href = "javascript:(" + (function (base) {
       const page = () => {
         const sp = document.querySelector("shreddit-post");
         const c = (sp && sp.getAttribute("content-href")) || "";
-        const u = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(c) ? [c] : [...document.querySelectorAll('meta[property="og:image"]')].map((m) => m.content);
+        let u = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(c) ? [c] : [...document.querySelectorAll('meta[property="og:image"]')].map((m) => m.content);
+        if (!u.length) u = [...document.querySelectorAll("shreddit-post img, shreddit-gallery img, gallery-carousel img")].map((i) => (i.currentSrc || i.src || "").replace(/^https:\/\/(?:preview|external-preview)\.redd\.it\/([\w-]+\.\w+).*$/, "https://i.redd.it/$1")).filter((s) => /^https:\/\/i\.redd\.it\/[\w-]+\.\w+$/.test(s));
+        if (!u.length) throw new Error("no images found on the page");
         open("reddit", (location.pathname.match(/\/r\/(\w+)/) || [])[1] || "reddit", m0 ? m0[1] : "post", u);
       };
       fetch(location.pathname.replace(/\/$/, "") + ".json?raw_json=1", { credentials: "include" })
@@ -564,9 +566,10 @@ $("bm").href = "javascript:(" + (function (base) {
             }
           } else if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(d.url || "")) u.push(d.url);
           else if (d.preview && d.preview.images[0]) u.push(d.preview.images[0].source.url);
+          if (!u.length) throw new Error("the post data has no image (video or text post?)");
           open("reddit", d.subreddit || "reddit", d.id, u);
         })
-        .catch((e) => { try { page(); } catch (e2) { bail("xpic: " + e.message); } });
+        .catch((e) => { try { page(); } catch (e2) { bail("xpic (reddit): " + e.message + " / " + e2.message); } });
       return;
     }
     if (/(^|\.)bilibili\.com$/.test(location.hostname)) {
