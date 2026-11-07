@@ -155,6 +155,8 @@ function parse(text) {
   if (rd) return { site: "reddit", user: rd[1] || "reddit", id: rd[2] || rd[3] || rd[4] };
   if (/reddit\.com\/r\/\w+\/s\//i.test(text)) return { site: "reddit", user: "reddit", id: "" };
   if (/(?:xiaohongshu|rednote)\.com|xhslink\.com/i.test(text)) return { site: "xhs", user: "xhs", id: "" };
+  const bl = text.match(/bilibili\.com\/(?:opus\/|dynamic\/)?(\d{10,})|t\.bilibili\.com\/(\d{10,})/i);
+  if (bl) return { site: "bilibili", user: "bilibili", id: bl[1] || bl[2] };
   const wb = text.match(/(?:weibo\.com|weibo\.cn)\/(?:detail\/(\w+)|(\d+)\/(\w+))/i);
   if (wb) return { site: "weibo", user: wb[2] || "weibo", id: wb[1] || wb[3] };
   return null;
@@ -181,6 +183,29 @@ async function getBlob(u) {
   const r = await fetch(`${proxy}${proxy.includes("?") ? "&" : "?"}url=${encodeURIComponent(u)}`);
   if (!r.ok) throw new Error(`Proxy failed (${r.status})`);
   return r.blob();
+}
+
+// Bilibili's post data is public but only sends CORS headers to bilibili.com pages, so it goes through the proxy (Settings).
+// Its image host (hdslb.com) allows any origin, so the pictures themselves download directly.
+async function fetchBilibili(p) {
+  const api = `https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id=${p.id}`;
+  const proxy = cfg.get("proxy");
+  if (!proxy) throw new Error("Bilibili needs an image proxy. Set one in Settings (see worker/image-proxy.js).");
+  const res = await fetch(`${proxy}${proxy.includes("?") ? "&" : "?"}url=${encodeURIComponent(api)}`).catch(() => null);
+  if (!res?.ok) throw new Error(`Bilibili lookup failed (${res ? res.status : "proxy unreachable"}). Redeploy the proxy worker?`);
+  const j = await res.json();
+  if (j.code === -352) throw new Error("Bilibili blocked the lookup (risk control). Try again later.");
+  if (j.code) throw new Error(`Post not found or private (Bilibili code ${j.code}).`);
+  let item = j.data?.item;
+  const pics = (it) => {
+    const mj = it?.modules?.module_dynamic?.major ?? {};
+    return (mj.draw?.items ?? []).map((x) => x.src).concat((mj.opus?.pics ?? []).map((x) => x.url)).filter(Boolean);
+  };
+  let urls = pics(item);
+  if (!urls.length && item?.orig) { item = item.orig; urls = pics(item); } // repost: use the original's images
+  const name = item?.modules?.module_author?.name;
+  if (name) p.user = name.replace(/[\\/:*?"<>|]/g, "_").trim() || p.user; // used for the {user} folder / filenames
+  return urls.map((u) => u.replace(/^http:/, "https:").replace(/@[\w.]+$/, ""));
 }
 
 // Reddit's public JSON: https://www.reddit.com/comments/<id>.json. Galleries list images in media_metadata, in gallery_data order.
@@ -246,6 +271,7 @@ async function fetchImages(p) {
   if (p.site === "reddit") return fetchReddit(p);
   if (p.site === "xhs") return fetchXhs(p);
   if (p.site === "weibo") return fetchWeibo(p);
+  if (p.site === "bilibili") return fetchBilibili(p);
   const { user, id } = p;
   const res = await fetch(`https://api.fxtwitter.com/${user}/status/${id}`);
   if (res.status === 404) throw new Error("Post not found (deleted or private?)");
@@ -487,7 +513,7 @@ function show(p, urls, manual = false) {
 async function run(text) {
   const p = parse(text);
   $("result").hidden = true;
-  if (!p) return setStatus("That doesn't look like an X, Pixiv, YouTube, Reddit, Weibo or Red Note link.", true);
+  if (!p) return setStatus("That doesn't look like an X, Pixiv, YouTube, Bilibili, Reddit, Weibo or Red Note link.", true);
   $("go").disabled = true;
   setStatus("Fetching…");
   try {

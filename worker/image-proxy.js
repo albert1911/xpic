@@ -2,7 +2,8 @@
 // Usage: GET https://<your-worker>.workers.dev/?url=<encoded image url>
 
 const ORIGINS = ["https://albert1911.github.io"]; // pages allowed to use this proxy
-const HOSTS = /^([\w-]+\.)*(redd\.it|xhscdn\.com|rednotecdn\.com|sinaimg\.cn)$/; // images it may fetch
+const HOSTS = /^([\w-]+\.)*(redd\.it|xhscdn\.com|rednotecdn\.com|sinaimg\.cn|api\.bilibili\.com)$/; // images (and bilibili's public post-data API) it may fetch
+const BILI_API = "/x/polymer/web-dynamic/v1/detail"; // the only api.bilibili.com path allowed
 
 export default {
   async fetch(req) {
@@ -18,6 +19,9 @@ export default {
       return new Response("host not allowed", { status: 403, headers: cors });
     }
 
+    if (target.hostname === "api.bilibili.com" && target.pathname !== BILI_API) {
+      return new Response("path not allowed", { status: 403, headers: cors });
+    }
     const headers = { "User-Agent": "Mozilla/5.0" };
     if (/sinaimg\.cn$/.test(target.hostname)) headers.Referer = "https://weibo.com/"; // Weibo images 403 without it
     const r = await fetch(target, { headers });
