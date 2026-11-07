@@ -419,13 +419,14 @@ async function saveToDrive() {
     setStatus(`Saving to Drive/${path}…`);
     const folderId = await ensureFolder(path);
     const failed = [];
+    let why = "";
     for (const [i, u] of current.urls.entries()) {
-      try { await uploadOne(folderId, u, i); } catch { failed.push(i + 1); }
+      try { await uploadOne(folderId, u, i); } catch (e) { failed.push(i + 1); why ||= e.message; }
     }
     const n = current.urls.length;
     if (failed.length < n) rememberFolder(rawFolder());
     setStatus(failed.length
-      ? `Saved ${n - failed.length}/${n} to Drive/${path}. Failed: #${failed.join(", #")}`
+      ? `Saved ${n - failed.length}/${n} to Drive/${path}. Failed: #${failed.join(", #")} (${why})`
       : `Saved ${n} image${n === 1 ? "" : "s"} to Drive/${path}`, failed.length > 0);
   } catch (e) {
     setStatus(e.message || "Drive save failed.", true);
