@@ -59,6 +59,10 @@
   #folderPills { display: flex; flex-wrap: wrap; gap: 6px; }
   #folderPills:not(:empty) { margin-top: 8px; }
   .pill { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--card); font-size: .85rem; }
+  .pill.manage { border-style: dashed; border-color: #60a5fa; color: #60a5fa; }
+  .pill.manage button:hover { background: rgba(96,165,250,.15); }
+  .pill.del { border-color: var(--err); color: var(--err); }
+  .pill.del button:hover { background: rgba(244,114,124,.15); }
   .pill button { background: none; border: 0; color: inherit; padding: 4px 10px; border-radius: 999px; font-size: inherit; cursor: pointer; }  input[type=checkbox] { flex: none; accent-color: var(--accent); cursor: pointer; }
   details small { display: block; margin-top: 12px; }
   .bar { flex-wrap: wrap; gap: 8px; }
@@ -113,6 +117,9 @@
     <label>OAuth Client ID (see README)
       <input type="text" id="clientId" placeholder="123456-abc.apps.googleusercontent.com" autocomplete="off">
     </label>
+    <label>Image proxy URL (optional, for Reddit / Red Note saves, see worker/image-proxy.js)
+      <input type="text" id="proxy" placeholder="https://xpic-proxy.yourname.workers.dev/" autocomplete="off">
+    </label>
     <small>Folder is nested with <code>/</code>, <code>{user}</code> = post author. Override per link with <code>?folder=Memes/Cats</code> or <code>?auto=0</code>.</small>
     <small>
       <b>Bookmarklet</b>: drag <a id="bm" class="btn ghost" style="padding:2px 8px; font-size: 10px;">XPIC</a> 
@@ -157,9 +164,15 @@ async function fetchXhs() {
   throw new Error("Red Note can't be fetched from a link. Open the post, then click the xpic bookmarklet (see Settings).");
 }
 
+// Direct fetch first; if the image host has no CORS headers, retry through the optional proxy (Settings).
 async function getBlob(u) {
-  const r = await fetch(u);
-  if (!r.ok) throw new Error("Download failed");
+  let direct = null;
+  try { direct = await fetch(u); } catch {}
+  if (direct?.ok) return direct.blob();
+  const proxy = cfg.get("proxy");
+  if (!proxy) throw new Error("Download blocked by the image host. Set an image proxy in Settings.");
+  const r = await fetch(`${proxy}${proxy.includes("?") ? "&" : "?"}url=${encodeURIComponent(u)}`);
+  if (!r.ok) throw new Error(`Proxy failed (${r.status})`);
   return r.blob();
 }
 
@@ -285,7 +298,8 @@ function folderPath() {
 }
 
 // Folders used before, most recent first; offered as suggestions on the folder input.
-const HISTORY_MAX = 30;
+const HISTORY_MAX = 500;
+let managing = false;
 const getHistory = () => { try { return JSON.parse(cfg.get("history", "[]")); } catch { return []; } };
 const setHistory = (h) => cfg.set("history", JSON.stringify(h));
 const segs = (p) => p.split("/").map((s) => s.trim()).filter(Boolean);
@@ -325,11 +339,17 @@ function renderHistory() {
   for (const name of names.values()) {
     const path = [...prefix, name].join("/");
     const pill = document.createElement("span");
-    pill.className = "pill";
+    pill.className = managing ? "pill del" : "pill";
     const pick = document.createElement("button");
     pick.type = "button";
-    pick.textContent = name;
+    pick.textContent = managing ? `${name} ×` : name;
     pick.onclick = () => {
+      if (managing) {
+        const target = segs(path);
+        setHistory(getHistory().filter((p) => !sameSegs(target, segs(p))));
+        renderHistory();
+        return;
+      }
       $("folder").value = path + "/";
       cfg.set("folder", path + "/");
       $("folder").focus();
@@ -337,6 +357,18 @@ function renderHistory() {
     };
     pill.append(pick);
     box.append(pill);
+  }
+  if (names.size || managing) {
+    const m = document.createElement("span");
+    m.className = "pill manage";
+    const tog = document.createElement("button");
+    tog.type = "button";
+    tog.textContent = managing ? "Done" : "Manage";
+    tog.title = "Delete saved folders from suggestions (also removes everything inside them)";
+    tog.onmousedown = (e) => e.preventDefault();
+    tog.onclick = () => { managing = !managing; renderHistory(); };
+    m.append(tog);
+    box.append(m);
   }
 }
 function rememberFolder(p) {
@@ -470,6 +502,8 @@ $("folder").value = cfg.get("folder");
 renderHistory();
 $("auto").checked = cfg.get("auto", "1") === "1";
 $("folderBox").hidden = !$("auto").checked;
+$("proxy").value = cfg.get("proxy");
+$("proxy").onchange = (e) => cfg.set("proxy", e.target.value.trim());
 $("clientId").onchange = (e) => cfg.set("clientId", e.target.value.trim());
 $("folder").onchange = (e) => cfg.set("folder", e.target.value.trim());
 $("folder").oninput = renderHistory;
