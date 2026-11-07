@@ -567,15 +567,21 @@ $("bm").href = "javascript:(" + (function (base) {
       const bid = m ? m[m.length - 1] : "";
       const uid = m && m.length === 3 ? m[1] : "weibo";
       if (!bid) return alert("xpic: open a single Weibo post first");
-      fetch("/ajax/statuses/show?id=" + bid, { credentials: "include" })
+      const xsrf = (document.cookie.match(/XSRF-TOKEN=([^;]+)/) || [])[1] || "";
+      fetch("/ajax/statuses/show?id=" + bid + "&locale=en-US&isGetLongText=true", { credentials: "include", headers: { "x-requested-with": "XMLHttpRequest", "x-xsrf-token": xsrf } })
         .then((r) => { if (!r.ok) throw new Error("Weibo returned " + r.status); return r.json(); })
         .then((d) => {
-          d = d.retweeted_status && !(d.pic_ids || []).length ? d.retweeted_status : d;
+          const has = (x) => (x.pic_ids || []).length || (x.mix_media_info && (x.mix_media_info.items || []).length) || (x.page_info && x.page_info.page_pic);
+          d = !has(d) && d.retweeted_status ? d.retweeted_status : d;
           const info = d.pic_infos || {};
-          const u = (d.pic_ids || []).map((k) => (info[k] && (info[k].largest || info[k].original || info[k].large) || {}).url || "https://wx1.sinaimg.cn/large/" + k + ".jpg");
+          const best = (i) => i && (i.largest || i.original || i.mw2000 || i.large || {}).url;
+          let u = (d.pic_ids || []).map((k) => best(info[k]) || "https://wx1.sinaimg.cn/large/" + k + ".jpg");
+          if (!u.length && d.mix_media_info) u = (d.mix_media_info.items || []).map((m) => m.type === "pic" && m.data ? best(m.data) : m.data && m.data.pic_info && best(m.data.pic_info)).filter(Boolean);
+          if (!u.length && d.page_info && d.page_info.page_pic) u = [d.page_info.page_pic.url || d.page_info.page_pic];
+          if (!u.length) return alert("xpic (weibo): no images in this post. Keys: " + Object.keys(d).slice(0, 25).join(","));
           open("weibo", (d.user && d.user.idstr) || uid, bid, u, true);
         })
-        .catch((e) => alert("xpic: " + e.message));
+        .catch((e) => alert("xpic (weibo): " + e.message));
       return;
     }
     const v = (x) => (x && x._value !== undefined ? x._value : x);
