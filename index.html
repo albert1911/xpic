@@ -93,7 +93,7 @@
     <input id="url" type="url" inputmode="url" placeholder="Paste your link here..." autocomplete="off" required>
     <button id="go" type="submit">Get images</button>
     <button id="paste" type="button" class="ghost">Paste</button>
-    <small class="hint">Paste an X (Twitter), Pixiv or YouTube (thumbnail) link. <br>Reddit, Weibo and rednote only work through the bookmarklet in Settings below.</small>
+    <small class="hint">Paste an X (Twitter), Pixiv or YouTube (thumbnail) link. <br>Reddit, Weibo and rednote (and Bilibili, if the proxy is blocked) work through the bookmarklet in Settings below.</small>
     <label class="autosave"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
     <div class="folder" id="folderBox" hidden>
       <input type="text" id="folder" placeholder="Insert your drive folder here..." autocomplete="off">
@@ -187,12 +187,35 @@ async function getBlob(u) {
 
 // Bilibili's post data is public but only sends CORS headers to bilibili.com pages, so it goes through the proxy (Settings).
 // Its image host (hdslb.com) allows any origin, so the pictures themselves download directly.
+// Second attempt, when the API refuses the proxy (412): read the public opus page and take the images from its embedded state.
+async function fetchBilibiliPage(p, proxy) {
+  const page = `https://www.bilibili.com/opus/${p.id}`;
+  const res = await fetch(`${proxy}${proxy.includes("?") ? "&" : "?"}url=${encodeURIComponent(page)}`).catch(() => null);
+  if (!res?.ok) return null;
+  const m = (await res.text()).match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\});?\s*\(function/);
+  let state;
+  try { state = JSON.parse(m?.[1]); } catch { return null; }
+  const mods = state?.detail?.modules ?? [];
+  const urls = [];
+  (function walk(o) {
+    if (o && typeof o === "object") for (const k in o) walk(o[k]);
+    else if (typeof o === "string" && /hdslb\.com\/bfs\/new_dyn\//.test(o)) urls.push(o);
+  })(mods);
+  const name = mods.find((x) => x.module_author)?.module_author?.name;
+  if (name) p.user = name.replace(/[\\/:*?"<>|]/g, "_").trim() || p.user;
+  return [...new Set(urls.map((u) => u.replace(/^http:/, "https:").replace(/@[\w.]+$/, "")))];
+}
+
 async function fetchBilibili(p) {
   const api = `https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id=${p.id}`;
   const proxy = cfg.get("proxy");
   if (!proxy) throw new Error("Bilibili needs an image proxy. Set one in Settings (see worker/image-proxy.js).");
   const res = await fetch(`${proxy}${proxy.includes("?") ? "&" : "?"}url=${encodeURIComponent(api)}`).catch(() => null);
-  if (res?.status === 412) throw new Error("Bilibili refused the request (412), often because it blocks the proxy's server IPs. Try again, or tell me if it keeps happening.");
+  if (res?.status === 412) {
+    const fromPage = await fetchBilibiliPage(p, proxy);
+    if (fromPage?.length) return fromPage;
+    throw new Error("Bilibili refused the request (412) and the page fallback found nothing. Open the post on bilibili.com and use the xpic bookmarklet (see Settings).");
+  }
   if (res?.status === 403) throw new Error("The proxy refused the request (403). Redeploy worker/image-proxy.js with Bilibili support.");
   if (!res?.ok) throw new Error(`Bilibili lookup failed (${res ? res.status : "proxy unreachable"}).`);
   const j = await res.json();
@@ -598,6 +621,26 @@ $("bm").href = "javascript:(" + (function (base) {
           open("reddit", d.subreddit || "reddit", d.id, u, true);
         })
         .catch((e) => { try { page(); } catch (e2) { bail("xpic: " + e.message); } });
+      return;
+    }
+    if (/(^|\.)bilibili\.com$/.test(location.hostname)) {
+      const bid = (location.pathname.match(/\/(\d{10,})/) || [])[1] || "";
+      if (!bid) return bail("xpic: open a single Bilibili post (opus) first");
+      fetch("https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id=" + bid, { credentials: "include" })
+        .then((r) => { if (!r.ok) throw new Error("Bilibili returned " + r.status); return r.json(); })
+        .then((j) => {
+          if (j.code) throw new Error("Bilibili code " + j.code);
+          let it = j.data.item;
+          const pics = (x) => {
+            const mj = (x && x.modules && x.modules.module_dynamic && x.modules.module_dynamic.major) || {};
+            return ((mj.draw && mj.draw.items) || []).map((i) => i.src).concat(((mj.opus && mj.opus.pics) || []).map((i) => i.url)).filter(Boolean);
+          };
+          let u = pics(it);
+          if (!u.length && it.orig) { it = it.orig; u = pics(it); }
+          const name = (it.modules && it.modules.module_author && it.modules.module_author.name) || "bilibili";
+          open("bilibili", name.replace(/[\\/:*?"<>|]/g, "_").trim() || "bilibili", bid, u.map((x) => x.replace(/@[\w.]+$/, "")));
+        })
+        .catch((e) => bail("xpic (bilibili): " + e.message));
       return;
     }
     if (/(^|\.)weibo\.(com|cn)$/.test(location.hostname)) {
