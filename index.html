@@ -169,12 +169,13 @@ const BOOKMARKLET_ONLY = { xhs: ["Red Note", "the post"], weibo: ["Weibo", "the 
 // Direct fetch first; if the image host has no CORS headers, retry through the optional proxy (Settings).
 async function getBlob(u) {
   let direct = null;
-  try { direct = await fetch(u); } catch {}
+  try { direct = await fetch(u, { referrerPolicy: "no-referrer" }); } catch {} // some hosts (Bilibili) 403 on a foreign Referer
   if (direct?.ok) return direct.blob();
+  const why = direct ? `direct ${direct.status}` : "direct blocked (CORS/network)";
   const proxy = cfg.get("proxy");
-  if (!proxy) throw new Error("Download blocked by the image host. Set an image proxy in Settings.");
+  if (!proxy) throw new Error(`Download blocked by the image host (${why}). Set an image proxy in Settings.`);
   const r = await fetch(`${proxy}${proxy.includes("?") ? "&" : "?"}url=${encodeURIComponent(u)}`);
-  if (!r.ok) throw new Error(`Proxy failed (${r.status})`);
+  if (!r.ok) throw new Error(`Proxy failed (${r.status}) after ${why}: ${new URL(u).host}`);
   return r.blob();
 }
 
