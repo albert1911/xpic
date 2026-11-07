@@ -93,7 +93,7 @@
     <input id="url" type="url" inputmode="url" placeholder="Paste your link here..." autocomplete="off" required>
     <button id="go" type="submit">Get images</button>
     <button id="paste" type="button" class="ghost">Paste</button>
-    <small class="hint">Paste an X (Twitter), Pixiv or YouTube (thumbnail) link. <br>Reddit, Weibo and rednote (and Bilibili, if the proxy is blocked) work through the bookmarklet in Settings below.</small>
+    <small class="hint">Paste an X (Twitter), Pixiv or YouTube (thumbnail) link. <br>Reddit, Weibo, Bilibili and rednote only work through the bookmarklet in Settings below.</small>
     <label class="autosave"><input type="checkbox" id="auto"> Auto-save to Drive after fetching</label>
     <div class="folder" id="folderBox" hidden>
       <input type="text" id="folder" placeholder="Insert your drive folder here..." autocomplete="off">
@@ -162,16 +162,9 @@ function parse(text) {
   return null;
 }
 
-// Weibo needs login/cookies and has no CORS, so images come from the bookmarklet (runs on weibo.com itself).
-async function fetchWeibo() {
-  throw new Error("Weibo can't be fetched from a link. Open the post on weibo.com, then click the xpic bookmarklet (see Settings).");
-}
-
-// Red Note blocks anonymous fetches (login wall), so images come from the bookmarklet in Settings,
-// which reads them from the post page in your own logged-in tab and opens xpic with ?xhs=<id>&img=<url>…
-async function fetchXhs() {
-  throw new Error("Red Note can't be fetched from a link. Open the post, then click the xpic bookmarklet (see Settings).");
-}
+// These sites block anonymous fetches (login wall / no CORS / blocked proxy IPs), so their images come from the bookmarklet
+// in Settings: it reads them from the post page in your own tab and reopens xpic with ?site=&user=&id=&img=<url>…
+const BOOKMARKLET_ONLY = { xhs: ["Red Note", "the post"], weibo: ["Weibo", "the post on weibo.com"], bilibili: ["Bilibili", "the post on bilibili.com"] };
 
 // Direct fetch first; if the image host has no CORS headers, retry through the optional proxy (Settings).
 async function getBlob(u) {
@@ -183,54 +176,6 @@ async function getBlob(u) {
   const r = await fetch(`${proxy}${proxy.includes("?") ? "&" : "?"}url=${encodeURIComponent(u)}`);
   if (!r.ok) throw new Error(`Proxy failed (${r.status})`);
   return r.blob();
-}
-
-// Bilibili's post data is public but only sends CORS headers to bilibili.com pages, so it goes through the proxy (Settings).
-// Its image host (hdslb.com) allows any origin, so the pictures themselves download directly.
-// Second attempt, when the API refuses the proxy (412): read the public opus page and take the images from its embedded state.
-async function fetchBilibiliPage(p, proxy) {
-  const page = `https://www.bilibili.com/opus/${p.id}`;
-  const res = await fetch(`${proxy}${proxy.includes("?") ? "&" : "?"}url=${encodeURIComponent(page)}`).catch(() => null);
-  if (!res?.ok) return null;
-  const m = (await res.text()).match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\});?\s*\(function/);
-  let state;
-  try { state = JSON.parse(m?.[1]); } catch { return null; }
-  const mods = state?.detail?.modules ?? [];
-  const urls = [];
-  (function walk(o) {
-    if (o && typeof o === "object") for (const k in o) walk(o[k]);
-    else if (typeof o === "string" && /hdslb\.com\/bfs\/new_dyn\//.test(o)) urls.push(o);
-  })(mods);
-  const name = mods.find((x) => x.module_author)?.module_author?.name;
-  if (name) p.user = name.replace(/[\\/:*?"<>|]/g, "_").trim() || p.user;
-  return [...new Set(urls.map((u) => u.replace(/^http:/, "https:").replace(/@[\w.]+$/, "")))];
-}
-
-async function fetchBilibili(p) {
-  const api = `https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id=${p.id}`;
-  const proxy = cfg.get("proxy");
-  if (!proxy) throw new Error("Bilibili needs an image proxy. Set one in Settings (see worker/image-proxy.js).");
-  const res = await fetch(`${proxy}${proxy.includes("?") ? "&" : "?"}url=${encodeURIComponent(api)}`).catch(() => null);
-  if (res?.status === 412) {
-    const fromPage = await fetchBilibiliPage(p, proxy);
-    if (fromPage?.length) return fromPage;
-    throw new Error("Bilibili refused the request (412) and the page fallback found nothing. Open the post on bilibili.com and use the xpic bookmarklet (see Settings).");
-  }
-  if (res?.status === 403) throw new Error("The proxy refused the request (403). Redeploy worker/image-proxy.js with Bilibili support.");
-  if (!res?.ok) throw new Error(`Bilibili lookup failed (${res ? res.status : "proxy unreachable"}).`);
-  const j = await res.json();
-  if (j.code === -352) throw new Error("Bilibili blocked the lookup (risk control). Try again later.");
-  if (j.code) throw new Error(`Post not found or private (Bilibili code ${j.code}).`);
-  let item = j.data?.item;
-  const pics = (it) => {
-    const mj = it?.modules?.module_dynamic?.major ?? {};
-    return (mj.draw?.items ?? []).map((x) => x.src).concat((mj.opus?.pics ?? []).map((x) => x.url)).filter(Boolean);
-  };
-  let urls = pics(item);
-  if (!urls.length && item?.orig) { item = item.orig; urls = pics(item); } // repost: use the original's images
-  const name = item?.modules?.module_author?.name;
-  if (name) p.user = name.replace(/[\\/:*?"<>|]/g, "_").trim() || p.user; // used for the {user} folder / filenames
-  return urls.map((u) => u.replace(/^http:/, "https:").replace(/@[\w.]+$/, ""));
 }
 
 // Reddit's public JSON: https://www.reddit.com/comments/<id>.json. Galleries list images in media_metadata, in gallery_data order.
@@ -294,9 +239,10 @@ async function fetchImages(p) {
   if (p.site === "pixiv") return fetchPixiv(p);
   if (p.site === "youtube") return fetchYoutube(p);
   if (p.site === "reddit") return fetchReddit(p);
-  if (p.site === "xhs") return fetchXhs(p);
-  if (p.site === "weibo") return fetchWeibo(p);
-  if (p.site === "bilibili") return fetchBilibili(p);
+  if (BOOKMARKLET_ONLY[p.site]) {
+    const [name, where] = BOOKMARKLET_ONLY[p.site];
+    throw new Error(`${name} can't be fetched from a link. Open ${where}, then click the xpic bookmarklet (see Settings).`);
+  }
   const { user, id } = p;
   const res = await fetch(`https://api.fxtwitter.com/${user}/status/${id}`);
   if (res.status === 404) throw new Error("Post not found (deleted or private?)");
@@ -600,7 +546,7 @@ $("bm").href = "javascript:(" + (function (base) {
         const sp = document.querySelector("shreddit-post");
         const c = (sp && sp.getAttribute("content-href")) || "";
         const u = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(c) ? [c] : [...document.querySelectorAll('meta[property="og:image"]')].map((m) => m.content);
-        open("reddit", (location.pathname.match(/\/r\/(\w+)/) || [])[1] || "reddit", m0 ? m0[1] : "post", u, true);
+        open("reddit", (location.pathname.match(/\/r\/(\w+)/) || [])[1] || "reddit", m0 ? m0[1] : "post", u);
       };
       fetch(location.pathname.replace(/\/$/, "") + ".json?raw_json=1", { credentials: "include" })
         .then((r) => { if (!r.ok) throw new Error("Reddit returned " + r.status); return r.json(); })
@@ -618,7 +564,7 @@ $("bm").href = "javascript:(" + (function (base) {
             }
           } else if (/\.(jpe?g|png|gif|webp)(\?|$)/i.test(d.url || "")) u.push(d.url);
           else if (d.preview && d.preview.images[0]) u.push(d.preview.images[0].source.url);
-          open("reddit", d.subreddit || "reddit", d.id, u, true);
+          open("reddit", d.subreddit || "reddit", d.id, u);
         })
         .catch((e) => { try { page(); } catch (e2) { bail("xpic: " + e.message); } });
       return;
