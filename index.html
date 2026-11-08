@@ -627,7 +627,7 @@ $("bm").href = "javascript:(" + (function (base) {
     if (!u.length) u = [...document.querySelectorAll('meta[name="og:image"],meta[property="og:image"]')].map((m) => m.content);
     open("xhs", "xhs", id || "note", u);
   } catch (e) { bail("xpic: " + e.message); }
-}).toString() + ")(" + JSON.stringify(location.origin + location.pathname) + ")";
+}).toString().replace(/\s*\n\s*/g, " ") + ")(" + JSON.stringify(location.origin + location.pathname) + ")";
 
 $("bmCopy").onclick = async (e) => {
   e.preventDefault();
