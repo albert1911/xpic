@@ -122,8 +122,11 @@
     </label>
     <small>Folder is nested with <code>/</code>, <code>{user}</code> = post author. Override per link with <code>?folder=Memes/Cats</code> or <code>?auto=0</code>.</small>
     <small>
-      <b>Bookmarklet</b>: drag <a id="bm" class="btn ghost" style="padding:2px 8px; font-size: 10px;">XPIC</a> 
-      to your bookmarks bar, then click it while viewing a post. On a phone: 
+      <b>Bookmarklet</b>: <br>
+      On a desktop: drag <a id="bm" class="btn ghost" style="padding:2px 8px; font-size: 10px;">XPIC</a> 
+      to your bookmarks bar, then click it while viewing a post. <br>
+      On a phone: pick a site 
+      <select id="bmSite" style="font-size:10px"><option value="reddit">Reddit</option><option value="xhs">Red Note</option><option value="weibo">Weibo</option><option value="bilibili">Bilibili</option></select>
       <a id="bmCopy" href="#" class="btn ghost" style="padding:2px 8px; font-size: 10px; white-space: nowrap;">copy bookmarklet</a>, 
       save it as a bookmark's URL, then type its name in Chrome's address bar on the post.
     </small>
@@ -529,9 +532,11 @@ $("auto").onchange = (e) => {
 };
 if (!cfg.get("clientId")) $("settings").open = true;
 
-// Bookmarklet (no // comments inside it: it's flattened to one line): runs on the post page in your own tab (Red Note needs your login; Reddit blocks cross-site requests,
-// but allows them from reddit.com itself), reads the images, and reopens xpic with ?site=&user=&id=&img=…
-$("bm").href = "javascript:(" + (function (base) {
+// Bookmarklets, one per site: phones cut long bookmark URLs at ~3.9k chars, so each one carries only its own site code.
+// They run on the post page in your own tab (Red Note needs your login; Reddit blocks cross-site requests but allows them from reddit.com itself),
+// read the images, and reopen xpic with ?site=&user=&id=&img=… No // comments inside them: they are flattened to one line.
+const bmBody = (f) => { const s = f.toString(); return s.slice(s.indexOf("{") + 1, s.lastIndexOf("}")); };
+const bmPre = function () {
   const tab = window.open("about:blank", "_blank");
   const bail = (m) => { if (tab) tab.close(); alert(m); };
   const open = (site, user, id, u) => {
@@ -541,8 +546,10 @@ $("bm").href = "javascript:(" + (function (base) {
     u.forEach((x) => p.append("img", x));
     if (tab) tab.location.href = base + "?" + p; else location.href = base + "?" + p;
   };
-  try {
-    if (/(^|\.)reddit\.com$/.test(location.hostname)) {
+};
+const bmSite = {
+  reddit: function () {
+    try {
       const m0 = location.pathname.match(/\/comments\/(\w+)/);
       const page = () => {
         const sp = document.querySelector("shreddit-post");
@@ -572,9 +579,10 @@ $("bm").href = "javascript:(" + (function (base) {
           open("reddit", d.subreddit || "reddit", d.id, u);
         })
         .catch((e) => { try { page(); } catch (e2) { bail("xpic (reddit): " + e.message + " / " + e2.message); } });
-      return;
-    }
-    if (/(^|\.)bilibili\.com$/.test(location.hostname)) {
+    } catch (e) { bail("xpic: " + e.message); }
+  },
+  bilibili: function () {
+    try {
       const bid = (location.pathname.match(/\/(\d{10,})/) || [])[1] || "";
       if (!bid) return bail("xpic: open a single Bilibili post (opus) first");
       fetch("https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id=" + bid, { credentials: "include" })
@@ -592,9 +600,10 @@ $("bm").href = "javascript:(" + (function (base) {
           open("bilibili", name.replace(/[\\/:*?"<>|]/g, "_").trim() || "bilibili", bid, u.map((x) => x.replace(/@[\w.]+$/, "")));
         })
         .catch((e) => bail("xpic (bilibili): " + e.message));
-      return;
-    }
-    if (/(^|\.)weibo\.(com|cn)$/.test(location.hostname)) {
+    } catch (e) { bail("xpic: " + e.message); }
+  },
+  weibo: function () {
+    try {
       const m = location.pathname.match(/\/(\d+)\/(\w+)\/?$/) || location.pathname.match(/\/detail\/(\w+)/);
       const bid = m ? m[m.length - 1] : "";
       const uid = m && m.length === 3 ? m[1] : "weibo";
@@ -614,8 +623,10 @@ $("bm").href = "javascript:(" + (function (base) {
           open("weibo", (d.user && d.user.idstr) || uid, bid, u);
         })
         .catch((e) => bail("xpic (weibo): " + e.message));
-      return;
-    }
+    } catch (e) { bail("xpic: " + e.message); }
+  },
+  xhs: function () {
+    try {
     const v = (x) => (x && x._value !== undefined ? x._value : x);
     const id = (location.pathname.match(/[0-9a-f]{24}/) || [])[0] || "";
     let u = [];
@@ -626,13 +637,20 @@ $("bm").href = "javascript:(" + (function (base) {
     } catch (e) {}
     if (!u.length) u = [...document.querySelectorAll('meta[name="og:image"],meta[property="og:image"]')].map((m) => m.content);
     open("xhs", "xhs", id || "note", u);
-  } catch (e) { bail("xpic: " + e.message); }
-}).toString().replace(/\s*\n\s*/g, " ") + ")(" + JSON.stringify(location.origin + location.pathname) + ")";
+    } catch (e) { bail("xpic: " + e.message); }
+  },
+};
+const bmHost = { reddit: /(^|\.)reddit\.com$/, bilibili: /(^|\.)bilibili\.com$/, weibo: /(^|\.)weibo\.(com|cn)$/ };
+const bmWrap = (js) => "javascript:(function(base){" + js + "})(" + JSON.stringify(location.origin + location.pathname) + ")";
+const bmAll = () => bmWrap([bmBody(bmPre), ...["reddit", "bilibili", "weibo"].map((k) => "if (" + bmHost[k] + ".test(location.hostname)) {" + bmBody(bmSite[k]) + "return; }"), bmBody(bmSite.xhs)].join(" "));
+const bmPhone = (site) => bmWrap([bmPre, bmSite[site]].map(bmBody).join(" ").replace(/\s*\n\s*/g, " "));
+$("bm").href = bmAll();
 
 $("bmCopy").onclick = async (e) => {
   e.preventDefault();
-  try { await navigator.clipboard.writeText($("bm").href); e.target.textContent = "copied!"; }
-  catch { prompt("Copy this:", $("bm").href); }
+  const code = bmPhone($("bmSite").value);
+  try { await navigator.clipboard.writeText(code); e.target.textContent = "copied! (" + code.length + " chars)"; }
+  catch { prompt("Copy this:", code); }
 };
 
 if (q.has("site") || q.has("xhs")) {
