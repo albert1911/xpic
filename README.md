@@ -32,6 +32,20 @@ missing folder in the configured path is created. It's a restricted scope, so Go
 "unverified app" warning — fine for personal use as a Test user. If you used an older version you'll be
 asked to consent again.
 
+## Image proxy (Cloudflare Worker, optional)
+Needed to save Reddit, rednote and Weibo images to Drive: their image hosts don't send CORS headers, so the browser can't download them directly. The worker in `worker/image-proxy.js` fetches them for you. The free plan is plenty.
+
+1. Sign up at https://dash.cloudflare.com (free).
+2. Workers & Pages → **Create** → **Create Worker**, name it e.g. `xpic-proxy`, click **Deploy**.
+3. Click **Edit code**, replace everything with the contents of `worker/image-proxy.js`.
+4. Change `ORIGINS` at the top to your own Pages origin (origin only, no path), e.g. `https://<you>.github.io`. Only these pages can use the proxy.
+5. Click **Deploy**.
+6. Copy the worker URL (`https://xpic-proxy.<you>.workers.dev/`) into *Settings* → **Image proxy URL**.
+
+Or with the CLI: `npx wrangler deploy worker/image-proxy.js --name xpic-proxy --compatibility-date 2024-01-01`.
+
+To test locally, add `http://localhost:8080` to `ORIGINS` too. The worker only fetches images from `redd.it`, `xhscdn.com`, `rednotecdn.com` and `sinaimg.cn`; edit `HOSTS` to allow others.
+
 ## Folder parameter
 - Default folder is set in settings. `{user}` is replaced with the post author, e.g. `XPic/{user}`.
 - Override per visit: `https://<you>.github.io/<repo>/?folder=Memes/Cats`
