@@ -604,19 +604,22 @@ const bmSite = {
   },
   weibo: function () {
     try {
-      const m = location.pathname.match(/\/(\d+)\/(\w+)\/?$/) || location.pathname.match(/\/detail\/(\w+)/);
+      const mob = /(^|\.)m\.weibo\.(cn|com)$/.test(location.hostname);
+      const m = location.pathname.match(/\/(?:status|detail)\/(\w+)/) || location.pathname.match(/\/(\d+)\/(\w+)\/?$/);
       const bid = m ? m[m.length - 1] : "";
       const uid = m && m.length === 3 ? m[1] : "weibo";
       if (!bid) return bail("xpic: open a single Weibo post first");
       const xsrf = (document.cookie.match(/XSRF-TOKEN=([^;]+)/) || [])[1] || "";
-      fetch("/ajax/statuses/show?id=" + bid + "&locale=en-US&isGetLongText=true", { credentials: "include", headers: { "x-requested-with": "XMLHttpRequest", "x-xsrf-token": xsrf } })
+      fetch(mob ? "/statuses/show?id=" + bid : "/ajax/statuses/show?id=" + bid + "&locale=en-US&isGetLongText=true", { credentials: "include", headers: { "x-requested-with": "XMLHttpRequest", "x-xsrf-token": xsrf } })
         .then((r) => { if (!r.ok) throw new Error("Weibo returned " + r.status); return r.json(); })
         .then((d) => {
-          const has = (x) => (x.pic_ids || []).length || (x.mix_media_info && (x.mix_media_info.items || []).length) || (x.page_info && x.page_info.page_pic);
+          if (mob) { if (!d.data) throw new Error("no post data (login needed?)"); d = d.data; }
+          const has = (x) => (x.pic_ids || []).length || (x.pics || []).length || (x.mix_media_info && (x.mix_media_info.items || []).length) || (x.page_info && x.page_info.page_pic);
           d = !has(d) && d.retweeted_status ? d.retweeted_status : d;
           const info = d.pic_infos || {};
           const best = (i) => i && (i.largest || i.original || i.mw2000 || i.large || {}).url;
-          let u = (d.pic_ids || []).map((k) => best(info[k]) || "https://wx1.sinaimg.cn/large/" + k + ".jpg");
+          let u = (d.pics || []).map((p) => (p.large && p.large.url) || p.url).filter(Boolean);
+          if (!u.length) u = (d.pic_ids || []).map((k) => best(info[k]) || "https://wx1.sinaimg.cn/large/" + k + ".jpg");
           if (!u.length && d.mix_media_info) u = (d.mix_media_info.items || []).map((m) => m.type === "pic" && m.data ? best(m.data) : m.data && m.data.pic_info && best(m.data.pic_info)).filter(Boolean);
           if (!u.length && d.page_info && d.page_info.page_pic) u = [d.page_info.page_pic.url || d.page_info.page_pic];
           if (!u.length) return bail("xpic (weibo): no images in this post. Keys: " + Object.keys(d).slice(0, 25).join(","));
