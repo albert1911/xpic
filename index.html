@@ -263,7 +263,7 @@ const extOf = (u) => exts.get(u) ?? u.split("?")[0].match(/\.(jpe?g|png|webp|gif
 const fileName = (u, i) => `${current.user}-${current.id}-${i + 1}${extOf(u)}`;
 
 // ---- Google Drive ----
-let token = null, tokenExp = 0;
+let token = cfg.get("token") || null, tokenExp = +cfg.get("tokenExp") || 0;
 
 async function gsiReady() {
   for (let i = 0; i < 100 && !window.google?.accounts; i++) await new Promise((r) => setTimeout(r, 100));
@@ -283,6 +283,8 @@ async function getToken() {
         if (!r.access_token) return reject(new Error(r.error_description || r.error || "Sign-in failed."));
         token = r.access_token;
         tokenExp = Date.now() + (r.expires_in - 60) * 1000;
+        cfg.set("token", token);
+        cfg.set("tokenExp", tokenExp);
         resolve(token);
       },
       error_callback: (e) => reject(new Error(
@@ -537,14 +539,18 @@ if (!cfg.get("clientId")) $("settings").open = true;
 // read the images, and reopen xpic with ?site=&user=&id=&img=… No // comments inside them: they are flattened to one line.
 const bmBody = (f) => { const s = f.toString(); return s.slice(s.indexOf("{") + 1, s.lastIndexOf("}")); };
 const bmPre = function () {
-  const tab = window.open("about:blank", "_blank");
-  const bail = (m) => { if (tab) tab.close(); alert(m); };
+  const tab = window.open("", "xpic");
+  let fresh = !tab;
+  try { fresh = !tab || tab.location.href === "about:blank"; } catch (e) {}
+  const bail = (m) => { if (tab && fresh) tab.close(); alert(m); };
   const open = (site, user, id, u) => {
     u = [...new Set(u.filter(Boolean).map((x) => x.replace(/^\/\//, "https://").replace(/^http:/, "https:")))];
     if (!u.length) return bail("xpic: no images found on this page");
     const p = new URLSearchParams({ site, user, id });
     u.forEach((x) => p.append("img", x));
-    if (tab) tab.location.href = base + "?" + p; else location.href = base + "?" + p;
+    if (!tab) location.href = base + "?" + p;
+    else if (fresh) tab.location.href = base + "?" + p;
+    else { tab.postMessage({ xpic: p.toString() }, new URL(base).origin); tab.focus(); }
   };
 };
 const bmSite = {
@@ -655,6 +661,13 @@ $("bmCopy").onclick = async (e) => {
   try { await navigator.clipboard.writeText(code); e.target.textContent = "copied! (" + code.length + " chars)"; }
   catch { prompt("Copy this:", code); }
 };
+
+window.name = "xpic";
+window.addEventListener("message", (e) => {
+  if (typeof e.data?.xpic !== "string" || !/^https:\/\/([\w-]+\.)*(reddit\.com|weibo\.(com|cn)|bilibili\.com|xiaohongshu\.com)$/.test(e.origin)) return;
+  const qq = new URLSearchParams(e.data.xpic), urls = qq.getAll("img");
+  if (urls.length) show({ site: qq.get("site"), user: qq.get("user") || qq.get("site"), id: qq.get("id") }, urls, true);
+});
 
 if (q.has("site") || q.has("xhs")) {
   const urls = q.getAll("img");
